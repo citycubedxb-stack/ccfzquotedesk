@@ -538,7 +538,7 @@ function renderTabs(){
 }
 function renderWho(){
   if(!ME){$('#who').innerHTML='';return}
-  $('#who').innerHTML=`<span class="mode shared" title="${IS_ADMIN?'Can change settings, team access and delete records':'Can create and edit quotes, customers and stock'}">${IS_ADMIN?'Admin':'Sales'}</span><span class="nm small">${esc(ME)}</span><button class="btn sm" data-act="signout">Sign out</button>`;
+  $('#who').innerHTML=`<span class="mode shared" title="${IS_ADMIN?'Can change settings, team access and delete records':'Can create and edit quotes, customers and stock'}">${IS_ADMIN?'Admin':'Sales'}</span><span class="nm small">${esc(ME)}</span>${IS_ADMIN?'<a class="btn sm" href="books.html" title="Open CityCube Books (accounting)">Accounts</a>':''}<button class="btn sm" data-act="signout">Sign out</button>`;
 }
 function render(){
   renderTabs();
