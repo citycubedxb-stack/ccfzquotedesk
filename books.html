@@ -969,13 +969,31 @@ async function exportXLSX(name, tables) {
   } catch (e) { toast('Excel export unavailable here – use CSV. ' + e.message, 'err'); }
 }
 async function exportPDF(el, name, orient = 'portrait', isDoc) {
+  let inner;
+  if (isDoc) inner = el.innerHTML;
+  else { const tmp = document.createElement('div'); tmp.innerHTML = el.innerHTML; $$('.expbar,.noprint,button,input[type=checkbox]', tmp).forEach(x => x.remove()); inner = `<style>${PRINT_CSS}</style><div class="pdfwrap"><div class="pdfhead"><div><img src="${EMBLEM}" alt=""><b>${esc(S.settings.name)}</b>${S.settings.trn ? ' · TRN ' + esc(S.settings.trn) : ''}</div><span>${esc(name.replace(/_/g, ' '))} · generated ${fmtD(today())}</span></div>${tmp.innerHTML}</div>`; }
+  if (FB) return printHTML(inner, name, orient);
+  const holder = document.createElement('div'); holder.style.cssText = 'position:fixed;left:-20000px;top:0;';
+  const node = document.createElement('div'); node.style.cssText = `width:${orient === 'landscape' ? 1123 : 794}px;background:#fff`; node.innerHTML = inner; holder.appendChild(node); document.body.appendChild(holder);
   try {
     const h2p = await loadLib('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js', 'html2pdf');
-    let node = el;
-    if (!isDoc) { node = document.createElement('div'); node.className = 'pdfwrap'; node.innerHTML = `<div class="pdfhead"><div><img src="${EMBLEM}" alt=""><b>${esc(S.settings.name)}</b>${S.settings.trn ? ' · TRN ' + esc(S.settings.trn) : ''}</div><span>${esc(name.replace(/_/g, ' '))} · generated ${fmtD(today())}</span></div>` + el.innerHTML; $$('.expbar,.noprint,button', node).forEach(x => x.remove()); }
-    const blob = await h2p().set({ margin: [8, 8, 10, 8], filename: name + '.pdf', image: { type: 'jpeg', quality: 0.96 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' }, jsPDF: { unit: 'mm', format: 'a4', orientation: orient }, pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.avoid'] } }).from(node).outputPdf('blob');
+    await Promise.all($$('img', node).map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; })));
+    const blob = await h2p().set({ margin: [8, 8, 10, 8], filename: name + '.pdf', image: { type: 'jpeg', quality: 0.96 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0, windowWidth: orient === 'landscape' ? 1123 : 794 }, jsPDF: { unit: 'mm', format: 'a4', orientation: orient }, pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.avoid'] } }).from(node).outputPdf('blob');
     downloadFile(name + '.pdf', blob);
-  } catch (e) { console.warn(e); toast('PDF engine unavailable here – downloading print-ready HTML instead', 'warn'); downloadFile(name + '.html', printableHTML(el.outerHTML, name)); }
+  } catch (e) { console.warn(e); toast('PDF engine unavailable here – downloading print-ready HTML instead', 'warn'); downloadFile(name + '.html', printableHTML(inner, name)); }
+  finally { holder.remove(); }
+}
+/* Browser print (Save as PDF) – used on the GitHub/Firebase site: sharp, selectable text, reliable */
+function printHTML(inner, title, orient = 'portrait') {
+  const f = document.createElement('iframe'); f.setAttribute('aria-hidden', 'true'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(f);
+  const d = f.contentWindow.document; d.open();
+  d.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&family=Noto+Sans+Arabic:wght@400;600&display=swap"><style>@page{size:A4 ${orient};margin:10mm}html,body{margin:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}.inv{padding:0}.pb{break-after:page}.pdfwrap .pbb{break-before:page}tr,.avoid{break-inside:avoid}${PRINT_CSS}</style></head><body>${inner}</body></html>`);
+  d.close();
+  const go = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('Printing is blocked here – downloading HTML instead', 'warn'); downloadFile(title + '.html', printableHTML(inner, title)); } setTimeout(() => f.remove(), 60000); };
+  const ready = () => Promise.all([d.fonts ? d.fonts.ready : 0, ...Array.from(d.images).map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; }))]);
+  setTimeout(() => ready().then(() => setTimeout(go, 150)), 50);
+  toast('Choose "Save as PDF" as the printer to save the file');
 }
 function printableHTML(inner, title) { return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&display=swap"><style>${PRINT_CSS}</style></head><body>${inner}</body></html>`; }
 
@@ -1230,7 +1248,7 @@ function bindDocActions(d0, side, isNew, coll) {
     if (act === 'credit' || act === 'debit') { const n = JSON.parse(JSON.stringify(byId(coll, d.id))); ['fromQuoteDesk', 'source', 'qdSig', 'qdTotal', 'qdStatus', 'qdPaidAt'].forEach(k => delete n[k]); Object.assign(n, { id: uid(), type: act, no: '', status: 'draft', againstId: d.id, date: today(), createdAt: null, updatedAt: null, postedAt: null, reason: '', returnStock: true, paidFrom: '', converted: false }); go(VIEW.page, 'edit', null, { _draft: n }); }
     if (act === 'convert') { const src = byId(coll, d.id); const n = JSON.parse(JSON.stringify(src)); Object.assign(n, { id: uid(), type: side === 'S' ? 'invoice' : 'bill', no: '', status: 'draft', date: today(), dueDate: addDays(today(), num((contact(src.contactId) || {}).terms ?? 30)), fromId: src.id, createdAt: null, updatedAt: null, terms: S.settings.invTerms }); src.converted = n.id; await store.save(coll, src, 'convert'); go(VIEW.page, 'edit', null, { _draft: n }); }
     if (act === 'dup') { const n = JSON.parse(JSON.stringify(byId(coll, d.id))); Object.assign(n, { id: uid(), no: '', status: 'draft', date: today(), createdAt: null, updatedAt: null, postedAt: null, converted: false, voidReason: '' }); go(VIEW.page, 'edit', null, { _draft: n }); }
-    if (act === 'pdf' || act === 'html') { const saved = byId(coll, d.id) || d; const html = docPrintHTML(saved, side); const name = (saved.no || 'draft').replace(/[^\w\-]/g, '_'); if (act === 'html') downloadFile(name + '.html', printableHTML(html, saved.no)); else { const host = document.createElement('div'); host.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff'; host.innerHTML = `<style>${PRINT_CSS}</style>` + html; document.body.appendChild(host); await exportPDF(host, name, 'portrait', true); host.remove(); } }
+    if (act === 'pdf' || act === 'html') { const saved = byId(coll, d.id) || d; const html = docPrintHTML(saved, side); const name = (saved.no || 'draft').replace(/[^\w\-]/g, '_'); if (act === 'html') downloadFile(name + '.html', printableHTML(html, saved.no)); else { const host = document.createElement('div'); host.innerHTML = `<style>${PRINT_CSS}</style>` + html; await exportPDF(host, name, 'portrait', true); host.remove(); } }
     if (act === 'xml') downloadFile((d.no || 'invoice').replace(/[^\w\-]/g, '_') + '.xml', ublXML(byId(coll, d.id)));
   });
 }
@@ -1388,7 +1406,7 @@ function payEditor(m) {
       ${openDocs.length ? openDocs.map(x => { const a = (p.allocations || []).find(a => a.docId === x.d.id); return `<tr><td>${esc(x.d.no)}</td><td>${fmtD(x.d.date)}</td><td>${fmtD(x.d.dueDate)}</td><td>${x.d.currency || 'AED'}</td><td class="n">${fmt(x.o)}</td><td class="n"><input class="num" data-alloc="${x.d.id}" value="${a ? a.amount : ''}" ${ro ? 'disabled' : ''}></td></tr>`; }).join('') : '<tr><td colspan="6" class="empty">No open documents – the amount will be held on account.</td></tr>'}
       </tbody></table></div>${!ro && openDocs.length ? '<button class="btn sm" id="autoAlloc">Auto-allocate oldest first</button>' : ''}<div id="allocSum" class="muted"></div>` : ''}
     ${p.bouncedDate ? `<div class="alert err">Cheque returned unpaid on ${fmtD(p.bouncedDate)}.</div>` : ''}
-    <div class="docact">${ro ? (p.status === 'posted' ? `<button class="btn" data-pa="pdf">Voucher PDF</button>${p.method === 'pdc' && !p.clearedDate && !p.bouncedDate ? '<button class="btn" data-pa="clr">Mark cleared</button><button class="btn" data-pa="bnc">Mark returned</button>' : ''}<button class="btn" data-pa="unpost">Revert to draft</button><button class="btn danger ghost" data-pa="void">Void</button>` : '') : `<button class="btn" data-pa="save">Save draft</button><button class="btn primary" data-pa="post">Post</button>${!isNew ? '<button class="btn danger ghost" data-pa="delete">Delete draft</button>' : ''}`}</div></div>`;
+    <div class="docact">${ro ? (p.status === 'posted' ? `<button class="btn" data-pa="pdf">${FB ? "Print / save PDF" : "Voucher PDF"}</button>${p.method === 'pdc' && !p.clearedDate && !p.bouncedDate ? '<button class="btn" data-pa="clr">Mark cleared</button><button class="btn" data-pa="bnc">Mark returned</button>' : ''}<button class="btn" data-pa="unpost">Revert to draft</button><button class="btn danger ghost" data-pa="void">Void</button>` : '') : `<button class="btn" data-pa="save">Save draft</button><button class="btn primary" data-pa="post">Post</button>${!isNew ? '<button class="btn danger ghost" data-pa="delete">Delete draft</button>' : ''}`}</div></div>`;
   if (ro) $$('.payform [data-k]').forEach(x => x.disabled = true);
   const read = () => { const o = JSON.parse(JSON.stringify(p)); $$('.payform [data-k]').forEach(el => o[el.dataset.k] = el.value.trim()); o.allocations = $$('[data-alloc]').map(i => ({ docId: i.dataset.alloc, amount: r2(num(i.value)) })).filter(a => a.amount > 0); o.rate = num(o.rate) || 1; o.amount = r2(num(o.amount)); return o; };
   const sumA = () => { const o = read(); const s = o.allocations.reduce((a, b) => a + b.amount, 0); const el = $('#allocSum'); if (el) el.innerHTML = `Allocated ${fmt(s)} · On account ${fmt(o.amount - s)}` + (s > o.amount + 0.005 ? ' <b class="neg">– allocations exceed amount</b>' : ''); };
@@ -1416,7 +1434,7 @@ function payEditor(m) {
     if (a === 'void') { if (!assertOpen(p.date)) return; confirmBox('Void ' + p.no + '? Allocations are released and the entry leaves the ledger.', async () => { const x = byId('payments', p.id); x.status = 'void'; await store.save('payments', x, 'void'); render(); }, 'Void', true); }
     if (a === 'unpost') { if (!assertOpen(p.date)) return; const x = byId('payments', p.id); x.status = 'draft'; await store.save('payments', x, 'unpost'); render(); }
     if (a === 'clr') pdcAction(p.id, 'clearedDate'); if (a === 'bnc') pdcAction(p.id, 'bouncedDate');
-    if (a === 'pdf') { const host = document.createElement('div'); host.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff'; host.innerHTML = `<style>${PRINT_CSS}</style>` + voucherHTML(p); document.body.appendChild(host); await exportPDF(host, p.no, 'portrait', true); host.remove(); }
+    if (a === 'pdf') { const host = document.createElement('div'); host.innerHTML = `<style>${PRINT_CSS}</style>` + voucherHTML(p); await exportPDF(host, p.no, 'portrait', true); host.remove(); }
   });
 }
 function voucherHTML(p) {
@@ -1773,7 +1791,7 @@ function payrunEditor(m) {
     if (a === 'delete') confirmBox('Delete this payroll draft?', async () => { await store.remove('payruns', r.id); go('payroll'); }, 'Delete', true);
     if (a === 'unpost' || a === 'void') { if (isLocked(r.date)) { toast('Locked period', 'err'); return; } const x = byId('payruns', r.id); x.status = a === 'void' ? 'void' : 'draft'; await store.save('payruns', x, a); render(); }
     if (a === 'sif') downloadSIF(byId('payruns', r.id));
-    if (a === 'slips') { const host = document.createElement('div'); host.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff'; host.innerHTML = `<style>${PRINT_CSS}</style>` + r.lines.map(l => payslipHTML(r, l)).join('<div class="pb"></div>'); document.body.appendChild(host); await exportPDF(host, 'Payslips_' + r.month, 'portrait', true); host.remove(); }
+    if (a === 'slips') { const host = document.createElement('div'); host.innerHTML = `<style>${PRINT_CSS}</style>` + r.lines.map(l => payslipHTML(r, l)).join('<div class="pb"></div>'); await exportPDF(host, 'Payslips_' + r.month, 'portrait', true); host.remove(); }
   });
 }
 function downloadSIF(r) {
