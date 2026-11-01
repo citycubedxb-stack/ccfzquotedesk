@@ -511,7 +511,7 @@ function buildLedger() {
     e.add(C('AP'), -sg * c.totalA, { contactId: d.contactId });
     d.lines.forEach((l, i) => {
       const cl = c.lines[i]; const it = item(l.itemId); const stock = tracksStock(l.itemId);
-      const target = stock ? ((it && it.invAcc) || C('INV')) : (l.acc || (it && it.purchAcc) || '6390');
+      const target = stock ? ((it && it.invAcc) || C('INV')) : billKind(d) === 'purchase' ? ((it && it.cogsAcc) || C('COGS')) : (l.acc || (it && it.purchAcc) || '6390');
       e.add(target, sg * (cl.netA + (cl.code === 'SRN' ? cl.vatA : 0)), { cc: l.cc || d.cc, desc: l.desc });
       if (cl.code === 'SR' || cl.rc) e.add(C('VATIN'), sg * cl.vatA);
       if (cl.rc) e.add(C('VATOUT'), -sg * cl.vatA);
@@ -817,7 +817,8 @@ function shell() {
         <div class="search"><input id="gsearch" placeholder="Search documents, contacts, items…" autocomplete="off"><div id="gres"></div></div>
         <div class="quick">
           <button class="btn primary" data-quick="invoice">+ Invoice</button>
-          <button class="btn" data-quick="bill">+ Bill</button>
+          <button class="btn" data-quick="bill">+ Purchase</button>
+          <button class="btn" data-quick="expense">+ Expense</button>
           <button class="btn" data-quick="receipt">+ Receipt</button>
         </div>
       </header>
@@ -830,7 +831,8 @@ function shell() {
   $$('[data-quick]').forEach(b => b.onclick = () => {
     const q = b.dataset.quick;
     if (q === 'invoice') { if (FB) { location.href = QUOTE_DESK_URL; return; } go('sales', 'edit', null, { type: 'invoice' }); }
-    if (q === 'bill') go('purchases', 'edit', null, { type: 'bill' });
+    if (q === 'bill') { VIEW.tab = 'purchase'; go('purchases', 'edit', null, { type: 'bill', billKind: 'purchase' }); }
+    if (q === 'expense') { VIEW.tab = 'expense'; go('purchases', 'edit', null, { type: 'bill', billKind: 'expense' }); }
     if (q === 'receipt') go('banking', 'edit', null, { kind: 'receipt' });
   });
   const gs = $('#gsearch');
@@ -1060,30 +1062,36 @@ const DOCTYPES = {
   S: { invoice: ['Tax invoice', 'inv'], credit: ['Tax credit note', 'cn'], quote: ['Quotation', 'qt'] },
   P: { bill: ['Purchase bill', 'bill'], debit: ['Debit note (supplier credit)', 'dn'], po: ['Purchase order', 'po'] }
 };
+/* Purchases of trading goods vs expenses: a bill is either a goods purchase (no account choice – stock items go to
+   inventory and on to cost of sales when sold, other lines go straight to cost of goods sold) or an expense bill (account per line). */
+const billKind = (d) => d.billKind || ((d.lines || []).length && d.lines.every(l => tracksStock(l.itemId)) ? 'purchase' : 'expense');
+const P_TABS = [['purchase', 'Purchases (goods)'], ['expense', 'Expenses'], ['debit', 'Debit notes'], ['po', 'Purchase orders']];
 function docListPage(m, side) {
   const coll = side === 'S' ? 'sales' : 'purchases'; const T = DOCTYPES[side];
   if (VIEW.sub === 'edit') return docEditor(m, side);
-  const tabKeys = Object.keys(T).filter(k => !(FB && k === 'quote'));
+  const tabKeys = side === 'P' ? P_TABS.map(x => x[0]) : Object.keys(T).filter(k => !(FB && k === 'quote'));
   const tab = VIEW.tab && tabKeys.includes(VIEW.tab) ? VIEW.tab : tabKeys[0]; VIEW.tab = tab;
+  const dtype = side === 'P' && ['purchase', 'expense'].includes(tab) ? 'bill' : tab;
   const f = VIEW.params.filter || 'all'; const q = (VIEW.params.q || '').toLowerCase();
-  let docs = S.data[coll].filter(d => d.type === tab).sort((a, b) => (b.date + b.no).localeCompare(a.date + a.no));
+  let docs = S.data[coll].filter(d => d.type === dtype && (dtype !== 'bill' || billKind(d) === tab)).sort((a, b) => (b.date + b.no).localeCompare(a.date + a.no));
   const rows = docs.map(d => { const c = calcDoc(d, side); const ct = contact(d.contactId); const st = docStatusLabel(d); const o = ['invoice', 'bill'].includes(d.type) && d.status === 'posted' ? openAmount(d) : null; return { d, no: d.no, date: d.date, due: d.dueDate, party: ct ? ct.name : '—', ref: d.reference || d.supplierInvNo || '', cur: d.currency || 'AED', net: c.net, vat: c.vat + (side === 'P' ? 0 : 0), total: c.total, totalA: c.totalA, open: o, st }; })
     .filter(r => (f === 'all' || r.st[0].toLowerCase().replace(' ', '') === f) && (!q || (r.no + r.party + r.ref).toLowerCase().includes(q)));
   const out = rows.filter(r => r.open > 0).reduce((s, r) => s + r.open * (num(r.d.rate) || 1), 0);
   const overdue = rows.filter(r => r.st[0] === 'Overdue').reduce((s, r) => s + r.open * (num(r.d.rate) || 1), 0);
   m.innerHTML = pageHead(side === 'S' ? 'Sales' : 'Purchases & Expenses', side === 'S' ? (FB ? 'Tax invoices from Quote Desk, receipts and tax credit notes' : 'Quotations, FTA-compliant tax invoices and tax credit notes') : 'Purchase orders, supplier bills, expenses, imports and reverse charge',
-    `${side === 'S' && !FB ? '<button class="btn" id="qdImp">Import from Quote Desk</button>' : ''}${FB && side === 'S' && tab === 'invoice' ? '' : '<button class="btn primary" id="newDoc">'}${FB && side === 'S' && tab === 'invoice' ? '' : '+ New ' + esc(T[tab][0].toLowerCase()) + '</button>'}${side === 'P' ? '<button class="btn" id="newExp">+ Quick expense</button>' : ''}`) +
-    (side === 'S' ? qdPanel() : '') + tabs(Object.entries(T).filter(([k]) => tabKeys.includes(k)).map(([k, v]) => [k, v[0] + 's']), tab) +
+    `${side === 'S' && !FB ? '<button class="btn" id="qdImp">Import from Quote Desk</button>' : ''}${side === 'P' ? '<button class="btn primary" data-newbill="purchase">+ Purchase (goods)</button><button class="btn" data-newbill="expense">+ Expense bill</button><button class="btn" id="newExp">+ Paid expense</button>' + (['debit', 'po'].includes(tab) ? '<button class="btn" id="newDoc">+ New ' + esc(T[tab][0].toLowerCase()) + '</button>' : '') : (FB && tab === 'invoice' ? '' : '<button class="btn primary" id="newDoc">+ New ' + esc(T[tab][0].toLowerCase()) + '</button>')}`) +
+    (side === 'S' ? qdPanel() : '') + tabs(side === 'P' ? P_TABS : Object.entries(T).filter(([k]) => tabKeys.includes(k)).map(([k, v]) => [k, v[0] + 's']), tab) +
     `<div class="kpis sm"><div class="kpi"><span>Documents</span><b>${rows.length}</b></div><div class="kpi"><span>Outstanding (AED)</span><b>${fmt(out)}</b></div><div class="kpi"><span>Overdue (AED)</span><b class="${overdue > 0 ? 'neg' : ''}">${fmt(overdue)}</b></div><div class="kpi"><span>Total value (AED)</span><b>${fmt(rows.filter(r => r.d.status === 'posted').reduce((s, r) => s + r.totalA, 0))}</b></div></div>
     <div class="card"><div class="toolbar"><input id="dq" placeholder="Filter by number, party, reference" value="${esc(VIEW.params.q || '')}"><select id="df">${['all', 'draft', 'unpaid', 'partpaid', 'overdue', 'paid', 'posted', 'void', 'open'].map(x => opt(x, x === 'all' ? 'All statuses' : x === 'partpaid' ? 'Part paid' : x[0].toUpperCase() + x.slice(1), f)).join('')}</select><span class="grow"></span>${exportBar('#docTbl', (side === 'S' ? 'Sales_' : 'Purchases_') + tab)}</div>
     ${dataTable([{ k: 'no', l: 'Number' }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }, { k: 'x', l: '', cls: 'noprint', html: r => r.open > 0.005 ? `<button class="btn sm" data-qpay="${r.d.id}">${side === 'S' ? 'Receive' : 'Pay'}</button>` : '' }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
   $$('[data-tab]', m).forEach(b => b.onclick = () => { VIEW.tab = b.dataset.tab; VIEW.params = {}; render(); });
   $$('[data-qpay]', m).forEach(b => b.onclick = (e) => { e.stopPropagation(); const d = byId(coll, b.dataset.qpay); go('banking', 'edit', null, { kind: side === 'S' ? 'receipt' : 'payment', contactId: d.contactId, allocate: d.id }); });
-  if ($('#newDoc')) $('#newDoc').onclick = () => go(VIEW.page, 'edit', null, { type: tab });
+  if ($('#newDoc')) $('#newDoc').onclick = () => go(VIEW.page, 'edit', null, { type: dtype });
+  $$('[data-newbill]', m).forEach(b => b.onclick = () => go('purchases', 'edit', null, { type: 'bill', billKind: b.dataset.newbill }));
   if ($('#qdSyncNow')) $('#qdSyncNow').onclick = () => { if (!QD.customers || !QD.quotes) { toast('Still connecting to Quote Desk…', 'warn'); return; } qdReconcile(true); };
   $$('[data-qdopen]', m).forEach(a => a.onclick = (e) => { e.preventDefault(); go('sales', 'edit', a.dataset.qdopen); });
   if ($('#qdImp')) $('#qdImp').onclick = quoteDeskImportDialog;
-  if ($('#newExp')) $('#newExp').onclick = () => go('purchases', 'edit', null, { type: 'bill', expense: true });
+  if ($('#newExp')) $('#newExp').onclick = () => go('purchases', 'edit', null, { type: 'bill', expense: true, billKind: 'expense' });
   $('#dq').oninput = (e) => { VIEW.params.q = e.target.value; clearTimeout(window._dq); window._dq = setTimeout(() => { render(); const i = $('#dq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 300); };
   $('#df').onchange = (e) => { VIEW.params.filter = e.target.value; render(); };
   bindExports(m);
@@ -1094,7 +1102,7 @@ PAGES.purchases = (m) => docListPage(m, 'P');
 function blankDoc(side, type, extra) {
   const s = S.settings; const d = { id: uid(), type, no: '', date: today(), status: 'draft', contactId: '', currency: 'AED', rate: 1, lines: [{ qty: 1, price: 0, disc: 0, vat: 'SR', desc: '' }], notes: '' };
   if (side === 'S') { d.supplyDate = ''; d.dueDate = addDays(today(), 30); d.emirate = s.emirate || 'DXB'; d.terms = type === 'quote' ? 'Quotation valid for 30 days.' : s.invTerms; if (type === 'credit') d.returnStock = true; if (type === 'quote') d.dueDate = addDays(today(), 30); }
-  else { d.dueDate = addDays(today(), 30); d.supplierInvNo = ''; if (extra && extra.expense) { d.paidFrom = lsGet('lastPaidFrom', (bankAccs()[0] || {}).code || '1100'); d.paidDate = today(); d.isExpense = true; } }
+  else { d.dueDate = addDays(today(), 30); d.supplierInvNo = ''; if (type === 'bill' || type === 'debit' || type === 'po') d.billKind = (extra && extra.billKind) || (extra && extra.expense ? 'expense' : 'purchase'); if (extra && extra.expense) { d.paidFrom = lsGet('lastPaidFrom', (bankAccs()[0] || {}).code || '1100'); d.paidDate = today(); d.isExpense = true; } }
   return d;
 }
 function docEditor(m, side) {
@@ -1104,7 +1112,9 @@ function docEditor(m, side) {
   if (!d && FB && side === 'S' && (VIEW.params.type === 'invoice' || (VIEW.params._draft && VIEW.params._draft.type === 'invoice'))) { m.innerHTML = pageHead('Tax invoices are issued in Quote Desk', '', '<button class="btn" id="back">← Back</button>') + `<div class="card"><p>To keep one gap-free tax invoice sequence for your TRN, tax invoices are created and numbered in Quote Desk. They appear here automatically within seconds.</p><a class="btn primary" href="${QUOTE_DESK_URL}">Open Quote Desk</a></div>`; $('#back').onclick = () => go('sales'); return; }
   if (!d) d = VIEW.params._draft || (VIEW.params._draft = blankDoc(side, VIEW.params.type || Object.keys(T)[0], VIEW.params));
   d = JSON.parse(JSON.stringify(d));
-  const ro = d.status !== 'draft'; const tName = T[d.type][0];
+  const ro = d.status !== 'draft'; const isPurch = side === 'P' && billKind(d) === 'purchase' && d.type !== 'po' || (side === 'P' && d.type === 'po' && d.billKind !== 'expense');
+  const showAcc = !isPurch; const showItem = side === 'S' || isPurch || d.lines.some(l => l.itemId);
+  const tName = side === 'P' && d.type === 'bill' ? (isPurch ? 'Purchase bill (goods)' : 'Expense bill') : T[d.type][0];
   const ct = contact(d.contactId); const codes = side === 'S' ? VAT_SALES : VAT_PURCH;
   const otherParty = side === 'S' ? 'C' : 'S';
   const againstList = (side === 'S' ? S.data.sales.filter(x => x.type === 'invoice') : S.data.purchases.filter(x => x.type === 'bill')).filter(x => x.status === 'posted' && (!d.contactId || x.contactId === d.contactId));
@@ -1132,8 +1142,8 @@ function docEditor(m, side) {
     </div>
     ${ct && side === 'S' && ct.vatRegistered && !ct.trn ? '<div class="alert warn">This customer is marked VAT-registered but has no TRN. The recipient TRN must appear on a full tax invoice.</div>' : ''}
     ${!S.settings.trn && side === 'S' && d.type !== 'quote' ? '<div class="alert warn">Your company TRN is not set (Company & Settings). A tax invoice must show the supplier TRN.</div>' : ''}
-    <div class="tblwrap"><table class="tbl lines" id="lines"><thead><tr><th style="width:15%">Item</th><th>Description</th><th class="n" style="width:7%">Qty</th><th class="n" style="width:9%">Unit price</th><th class="n" style="width:6%">Disc %</th><th style="width:13%">VAT</th><th style="width:15%">Account</th><th class="n" style="width:9%">Amount</th><th class="n" style="width:7%">VAT</th><th style="width:30px"></th></tr></thead><tbody></tbody></table></div>
-    ${ro ? '' : '<button class="btn sm" id="addLine">+ Add line</button>'}
+    <div class="tblwrap"><table class="tbl lines" id="lines"><thead><tr>${showItem ? '<th style="width:16%">Item</th>' : ''}<th>Description</th><th class="n" style="width:7%">Qty</th><th class="n" style="width:9%">Unit ${side === 'P' ? 'cost' : 'price'}</th><th class="n" style="width:6%">Disc %</th><th style="width:14%">VAT</th>${showAcc ? `<th style="width:16%">${side === 'S' ? 'Income account' : 'Expense account'}</th>` : ''}<th class="n" style="width:9%">Amount</th><th class="n" style="width:7%">VAT</th><th style="width:30px"></th></tr></thead><tbody></tbody></table></div>
+    ${ro ? '' : '<button class="btn sm" id="addLine">+ Add line</button>'}${isPurch ? '<span class="small muted" style="margin-left:10px">Goods for resale: stock items go to inventory and move to cost of goods sold when sold; other lines (freight, duty, non-stock goods) go straight to cost of goods sold.</span>' : ''}
     <div class="docbottom"><div class="grow">
       ${field(['notes', side === 'S' ? 'Notes (shown on document)' : 'Internal notes', 'textarea', { rows: 2 }], d.notes)}
       ${side === 'S' ? field(['terms', 'Terms & conditions', 'textarea', { rows: 2 }], d.terms) : ''}
@@ -1145,17 +1155,17 @@ function docEditor(m, side) {
   const tb = $('#lines tbody');
   function drawLines() {
     tb.innerHTML = d.lines.map((l, i) => `<tr data-i="${i}">
-      <td><select data-l="itemId">${itemOptions(l.itemId, !ro)}</select></td>
+      ${showItem ? `<td><select data-l="itemId">${itemOptions(l.itemId, !ro)}</select></td>` : ''}
       <td><input data-l="desc" value="${esc(l.desc)}" placeholder="Description of goods / services"></td>
       <td><input data-l="qty" class="num" value="${esc(l.qty)}"></td>
       <td><input data-l="price" class="num" value="${esc(l.price)}"></td>
       <td><input data-l="disc" class="num" value="${esc(l.disc || '')}"></td>
       <td><select data-l="vat">${Object.entries(codes).map(([k, v]) => opt(k, v.label, l.vat)).join('')}</select></td>
-      <td><select data-l="acc">${accOptions(l.acc, a => side === 'S' ? (a.type === 'I') : (a.type === 'X' || a.type === 'A'), tracksStock(l.itemId) ? (side === 'S' ? 'Item default (revenue)' : 'Inventory (stock item)') : l.itemId && side === 'S' ? 'Item default (revenue)' : '— select account —')}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select></td>
+      ${showAcc ? `<td><select data-l="acc">${accOptions(l.acc, a => side === 'S' ? (a.type === 'I') : (a.type === 'X' || a.type === 'A'), tracksStock(l.itemId) ? (side === 'S' ? 'Item default (revenue)' : 'Inventory (stock item)') : l.itemId && side === 'S' ? 'Item default (revenue)' : '— select account —')}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select></td>` : ''}
       <td class="n" data-o="net"></td><td class="n" data-o="vat"></td>
       <td>${ro ? '' : `<button class="iconbtn sm" data-del="${i}" title="Remove">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
     if (ro) $$('input,select', tb).forEach(x => x.disabled = true);
-    const applyItem = (i) => { const it = item(d.lines[i].itemId); if (!it) return; const l = d.lines[i]; l.desc = it.name + (it.description ? ' – ' + it.description : ''); l.price = side === 'S' ? (it.price || 0) : (it.cost || 0); l.vat = side === 'S' ? (it.vatS || defaultVat(side)) : (it.vatP || defaultVat(side)); l.acc = it.type === 'goods' && side === 'P' ? '' : (side === 'S' ? it.salesAcc : it.purchAcc) || ''; if (d.rate && num(d.rate) !== 1 && l.price) l.price = r2(num(l.price) / num(d.rate)); };
+    const applyItem = (i) => { const it = item(d.lines[i].itemId); if (!it) return; const l = d.lines[i]; l.desc = it.name + (it.description ? ' – ' + it.description : ''); l.price = side === 'S' ? (it.price || 0) : (it.cost || 0); l.vat = side === 'S' ? (it.vatS || defaultVat(side)) : (it.vatP || defaultVat(side)); l.acc = (it.type === 'goods' && side === 'P') || isPurch ? '' : (side === 'S' ? it.salesAcc : it.purchAcc) || ''; if (d.rate && num(d.rate) !== 1 && l.price) l.price = r2(num(l.price) / num(d.rate)); };
     $$('[data-l]', tb).forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
       const i = Number(el.closest('tr').dataset.i); const k = el.dataset.l;
       if (el.value === NEWOPT) {
@@ -1205,11 +1215,11 @@ function docEditor(m, side) {
   function applyContact(c) {
     d.currency = c.currency || 'AED'; d.rate = rateFor(d.currency, d.date); if (side === 'S' && c.emirate) d.emirate = c.emirate; if (!d._dueManual) d.dueDate = addDays(d.date, num(c.terms ?? 30));
     const blank = d.lines.every(l => !l.itemId && !l.desc && !num(l.price));
-    const last = side === 'P' ? S.data.purchases.filter(x => x.contactId === c.id && x.status === 'posted' && ['bill'].includes(x.type)).sort((a, b) => b.date.localeCompare(a.date))[0] : null;
-    if (blank && last) { const lt = last.lines.filter(l => !l.itemId); if (lt.length) d.lines = lt.map(l => ({ desc: l.desc, qty: 1, price: 0, disc: 0, vat: l.vat, acc: l.acc, cc: l.cc })); if (d.type === 'bill' && d.isExpense && last.paidFrom) d.paidFrom = last.paidFrom; toast('Lines pre-filled from ' + last.no + ' – enter this bill\u2019s amounts'); }
+    const last = side === 'P' ? S.data.purchases.filter(x => x.contactId === c.id && x.status === 'posted' && ['bill'].includes(x.type) && billKind(x) === billKind(d)).sort((a, b) => b.date.localeCompare(a.date))[0] : null;
+    if (blank && last) { const lt = last.lines.filter(l => !l.itemId); if (lt.length && billKind(last) === billKind(d)) d.lines = lt.map(l => ({ desc: l.desc, qty: 1, price: 0, disc: 0, vat: l.vat, acc: isPurch ? '' : l.acc, cc: l.cc })); if (d.type === 'bill' && d.isExpense && last.paidFrom) d.paidFrom = last.paidFrom; toast('Lines pre-filled from ' + last.no + ' – enter this bill\u2019s amounts'); }
     else d.lines.forEach(l => { if (!l.itemId && !l.desc) l.vat = defaultVat(side); });
   }
-  $('#back').onclick = () => go(VIEW.page);
+  $('#back').onclick = () => { if (side === 'P' && d.type === 'bill') VIEW.tab = billKind(d); go(VIEW.page); };
   if ($('#addLine')) $('#addLine').onclick = () => { d.lines.push({ qty: 1, price: 0, disc: 0, vat: defaultVat(side), desc: '' }); drawLines(); };
   bindDocActions(d, side, isNew, coll);
 }
@@ -1248,7 +1258,7 @@ function validateDoc(d, side, posting) {
   if (!d.contactId) errs.push((side === 'S' ? 'Customer' : 'Supplier') + ' is required.');
   if (!d.date) errs.push('Date is required.');
   if (!d.lines.length || d.lines.every(l => !num(l.qty) || !num(l.price))) errs.push('Add at least one line with quantity and price.');
-  d.lines.forEach((l, i) => { if (!l.desc && !l.itemId) errs.push('Line ' + (i + 1) + ': description required.'); if (side === 'P' && !tracksStock(l.itemId) && !l.acc && num(l.price)) errs.push('Line ' + (i + 1) + ': choose the expense / asset account.'); if (num(l.qty) < 0 || num(l.price) < 0) errs.push('Line ' + (i + 1) + ': use a credit/debit note instead of negative amounts.'); });
+  d.lines.forEach((l, i) => { if (!l.desc && !l.itemId) errs.push('Line ' + (i + 1) + ': description required.'); if (side === 'P' && billKind(d) === 'expense' && !tracksStock(l.itemId) && !l.acc && num(l.price)) errs.push('Line ' + (i + 1) + ': choose the expense / asset account.'); if (num(l.qty) < 0 || num(l.price) < 0) errs.push('Line ' + (i + 1) + ': use a credit/debit note instead of negative amounts.'); });
   if (!num(d.rate) || num(d.rate) <= 0) errs.push('Exchange rate must be positive.');
   if (posting && isLocked(d.date)) errs.push('The date falls in a locked period (≤ ' + fmtD(S.settings.lockDate) + ').');
   if (posting && side === 'S' && ['invoice', 'credit'].includes(d.type)) {
@@ -1277,7 +1287,7 @@ function bindDocActions(d0, side, isNew, coll) {
     if (act === 'save') { const v = validateDoc(d, side, false); if (!d.contactId) { toast(v.errs[0], 'err'); return; } d.status = 'draft'; d._total = v.c.total; await store.save(coll, d); VIEW.params._draft = null; toast('Draft saved'); go(VIEW.page, 'edit', d.id); }
     if (act === 'post' || act === 'postnew') {
       const v = validateDoc(d, side, true); if (v.errs.length) { modal('Cannot post', '<ul class="errs">' + v.errs.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>', [{ label: 'OK', cls: 'primary' }]); return; }
-      const doPost = async () => { if (!d.no) d.no = nextNumber(T[1]); d.status = 'posted'; d.postedAt = new Date().toISOString(); d._total = v.c.total; delete d._dueManual; delete d._paidManual; await store.save(coll, d, 'post'); VIEW.params._draft = null; toast(T[0] + ' ' + d.no + ' posted'); if (act === 'postnew') go(VIEW.page, 'edit', null, { type: d.type, expense: d.isExpense }); else go(VIEW.page, 'edit', d.id); };
+      const doPost = async () => { if (!d.no) d.no = nextNumber(T[1]); d.status = 'posted'; d.postedAt = new Date().toISOString(); d._total = v.c.total; delete d._dueManual; delete d._paidManual; await store.save(coll, d, 'post'); VIEW.params._draft = null; toast(T[0] + ' ' + d.no + ' posted'); if (act === 'postnew') go(VIEW.page, 'edit', null, { type: d.type, expense: d.isExpense, billKind: d.billKind }); else go(VIEW.page, 'edit', d.id); };
       if (v.warns.length) modal('Check before posting', '<ul class="warns">' + v.warns.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>', [{ label: 'Go back' }, { label: 'Post anyway', cls: 'primary', onClick: doPost }]); else await doPost();
     }
     if (act === 'delete') confirmBox('Delete this draft? This cannot be undone.', async () => { await store.remove(coll, d.id); toast('Draft deleted'); go(VIEW.page); }, 'Delete', true);
