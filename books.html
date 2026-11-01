@@ -96,6 +96,7 @@ body.locked #side,body.locked .search,body.locked .quick,body.locked #menuBtn{di
 .attdrop{display:flex;align-items:center;justify-content:center;border:1.5px dashed #b9c3d6;border-radius:10px;padding:14px;cursor:pointer;color:var(--ink2);background:#fbfcfe}.attdrop:hover,.attdrop.over{border-color:var(--mag);background:var(--accl)}
 .lh{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.25;white-space:normal}.lh:empty{display:none}.warnt{color:var(--amb)!important}
 .hintbar{background:#f4f6fb;border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:8px;padding:7px 12px;margin:2px 0 12px;font-size:12.5px;color:var(--ink2);line-height:1.6}.hintbar:empty{display:none}.hintbar .sep{color:#b8c0cf;margin:0 2px}
+.profit{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:8px 0 10px}.pgrid>div{background:#f6f8fc;border:1px solid var(--line);border-radius:8px;padding:8px 10px}.pgrid span{display:block;font-size:11.5px;color:var(--ink2)}.pgrid b{font:700 17px var(--f-display);color:var(--acc)}.pgrid .pos b{color:var(--grn)}.pgrid .neg b{color:var(--red)}
 </style></head><body>
 <script>var BOOKS_TARGET = 'firebase';
 /* CityCube brand assets (from the CityCube Quote Desk letterhead) */
@@ -1138,7 +1139,7 @@ function docListPage(m, side) {
     (side === 'S' ? qdPanel() : '') + tabs(side === 'P' ? P_TABS : Object.entries(T).filter(([k]) => tabKeys.includes(k)).map(([k, v]) => [k, v[0] + 's']), tab) +
     `<div class="kpis sm"><div class="kpi"><span>Documents</span><b>${rows.length}</b></div><div class="kpi"><span>Outstanding (AED)</span><b>${fmt(out)}</b></div><div class="kpi"><span>Overdue (AED)</span><b class="${overdue > 0 ? 'neg' : ''}">${fmt(overdue)}</b></div><div class="kpi"><span>Total value (AED)</span><b>${fmt(rows.filter(r => r.d.status === 'posted').reduce((s, r) => s + r.totalA, 0))}</b></div></div>
     <div class="card"><div class="toolbar"><input id="dq" placeholder="Filter by number, party, reference" value="${esc(VIEW.params.q || '')}"><select id="df">${['all', 'draft', 'unpaid', 'partpaid', 'overdue', 'paid', 'posted', 'void', 'open'].map(x => opt(x, x === 'all' ? 'All statuses' : x === 'partpaid' ? 'Part paid' : x[0].toUpperCase() + x.slice(1), f)).join('')}</select><span class="grow"></span>${exportBar('#docTbl', (side === 'S' ? 'Sales_' : 'Purchases_') + tab)}</div>
-    ${dataTable([{ k: 'no', l: 'Number', fmt: (v, r) => (v || 'Draft') + ((r.d.attachments || []).length ? ' 📎' : '') }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }, { k: 'x', l: '', cls: 'noprint', html: r => r.open > 0.005 ? `<button class="btn sm" data-qpay="${r.d.id}">${side === 'S' ? 'Receive' : 'Pay'}</button>` : '' }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
+    ${dataTable([{ k: 'no', l: 'Number', fmt: (v, r) => (v || 'Draft') + ((r.d.attachments || []).length ? ' 📎' : '') }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }, ...(side === 'S' && tab === 'invoice' ? [{ k: 'mg', l: 'Margin', num: 1, html: r => { if (r.d.status !== 'posted') return ''; const P = invoiceProfit(r.d); return P.rev ? `<span class="${P.pct < 0 ? 'neg' : P.pct < 10 ? 'warnt' : ''}">${P.pct.toFixed(1)}%</span>` : ''; } }] : []), { k: 'x', l: '', cls: 'noprint', html: r => r.open > 0.005 ? `<button class="btn sm" data-qpay="${r.d.id}">${side === 'S' ? 'Receive' : 'Pay'}</button>` : '' }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
   $$('[data-tab]', m).forEach(b => b.onclick = () => { VIEW.tab = b.dataset.tab; VIEW.params = {}; render(); });
   $$('[data-qpay]', m).forEach(b => b.onclick = (e) => { e.stopPropagation(); const d = byId(coll, b.dataset.qpay); go('banking', 'edit', null, { kind: side === 'S' ? 'receipt' : 'payment', contactId: d.contactId, allocate: d.id }); });
   if ($('#newDoc')) $('#newDoc').onclick = () => go(VIEW.page, 'edit', null, { type: dtype });
@@ -1185,6 +1186,7 @@ function docEditor(m, side) {
       ${side === 'S' && d.type !== 'quote' ? field(['supplyDate', 'Date of supply (if different)', 'date', { help: 'Tax invoice must be issued within 14 days of supply (Art. 67).' }], d.supplyDate) : ''}
       ${side === 'S' ? field(['emirate', 'Place of supply (emirate)', 'select', { options: emirateOptions, help: 'Drives VAT 201 boxes 1a–1g' }], d.emirate) : field(['supplierInvNo', 'Supplier invoice no.', 'text', { help: 'As shown on supplier’s tax invoice' }], d.supplierInvNo)}
       ${field(['reference', side === 'S' ? 'Customer PO / reference' : 'Reference', 'text'], d.reference)}
+      ${side === 'P' && ['bill', 'debit'].includes(d.type) ? field(['jobId', 'For sales invoice (job costing)', 'select', { options: (v) => jobOptions(v), help: 'Links the whole bill to one invoice to measure its profit. Use 🔗 on a line to split it between invoices.' }], d.jobId) : ''}
       ${side === 'P' && d.type !== 'po' ? field(['permitNo', 'Customs declaration no. (imports)', 'text', { help: 'Reported in the FTA Audit File' }], d.permitNo) : ''}
       ${field(['currency', 'Currency', 'select', { options: curOptions }], d.currency)}
       ${field(['rate', 'Exchange rate to AED', 'money', { help: 'AED per 1 unit; CBUAE rate on date of supply' }], d.rate)}
@@ -1205,6 +1207,7 @@ function docEditor(m, side) {
       ${field(['notes', side === 'S' ? 'Notes (shown on document)' : 'Internal notes', 'textarea', { rows: 2 }], d.notes)}
       ${side === 'S' ? field(['terms', 'Terms & conditions', 'textarea', { rows: 2 }], d.terms) : ''}
     </div><div class="totals" id="totals"></div></div>
+    <div id="profitHost"></div>
     <div id="attHost"></div>
     <div class="docact">${docActions(d, side, isNew)}</div>
     ${!isNew ? `<div class="meta">Created ${d.createdAt ? new Date(d.createdAt).toLocaleString() : ''} · Last change ${d.updatedAt ? new Date(d.updatedAt).toLocaleString() : ''}</div>` : ''}
@@ -1214,14 +1217,14 @@ function docEditor(m, side) {
   function drawLines() {
     tb.innerHTML = d.lines.map((l, i) => `<tr data-i="${i}">
       ${showItem ? `<td><select data-l="itemId">${itemOptions(l.itemId, !ro)}</select><div class="lh" data-h="item"></div></td>` : ''}
-      <td><input data-l="desc" value="${esc(l.desc)}" placeholder="Description of goods / services"></td>
+      <td><input data-l="desc" value="${esc(l.desc)}" placeholder="Description of goods / services">${side === 'P' ? `<div class="lh" data-h="job">${(l.jobs && l.jobs.length) ? '🔗 ' + l.jobs.map(j => esc((byId('sales', j.docId) || {}).no || '?') + (l.jobs.length > 1 ? ' ' + fmt(j.amount) : '')).join(', ') : (d.jobId && !tracksStock(l.itemId) ? '🔗 ' + esc((byId('sales', d.jobId) || {}).no || '') : '')}</div>` : ''}</td>
       <td><input data-l="qty" class="num" value="${esc(l.qty)}"></td>
       <td><input data-l="price" class="num" value="${esc(l.price)}"></td>
       <td><input data-l="disc" class="num" value="${esc(l.disc || '')}"></td>
       <td><select data-l="vat">${Object.entries(codes).map(([k, v]) => opt(k, v.label, l.vat)).join('')}</select></td>
       ${showAcc ? `<td><select data-l="acc">${accOptions(l.acc, a => side === 'S' ? (a.type === 'I') : (a.type === 'X' || a.type === 'A'), tracksStock(l.itemId) ? (side === 'S' ? 'Item default (revenue)' : 'Inventory (stock item)') : l.itemId && side === 'S' ? 'Item default (revenue)' : '— select account —')}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select><div class="lh" data-h="acc"></div></td>` : ''}
       <td class="n" data-o="net"></td><td class="n" data-o="vat"></td>
-      <td>${ro ? '' : `<button class="iconbtn sm" data-del="${i}" title="Remove">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
+      <td style="white-space:nowrap">${side === 'P' && ['bill', 'debit'].includes(d.type) && !tracksStock(l.itemId) && d.status !== 'void' ? `<button class="iconbtn sm" data-job="${i}" title="Link / split this line to sales invoices (job costing)">🔗</button>` : ''}${ro ? '' : `<button class="iconbtn sm" data-del="${i}" title="Remove">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
     if (ro) $$('input,select', tb).forEach(x => x.disabled = true);
     const applyItem = (i) => { const it = item(d.lines[i].itemId); if (!it) return; const l = d.lines[i]; l.desc = it.name + (it.description ? ' – ' + it.description : ''); l.price = side === 'S' ? (it.price || 0) : (it.cost || 0); l.vat = side === 'S' ? (it.vatS || defaultVat(side)) : (it.vatP || defaultVat(side)); l.acc = (it.type === 'goods' && side === 'P') || isPurch ? '' : (side === 'S' ? it.salesAcc : it.purchAcc) || ''; if (d.rate && num(d.rate) !== 1 && l.price) l.price = r2(num(l.price) / num(d.rate)); };
     $$('[data-l]', tb).forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
@@ -1238,6 +1241,7 @@ function docEditor(m, side) {
     }));
     // Enter on the last row adds a new line; Enter elsewhere moves to the next row
     $$('input[data-l]', tb).forEach(el => el.addEventListener('keydown', (e) => { if (e.key !== 'Enter' || e.ctrlKey || e.metaKey) return; e.preventDefault(); const tr = el.closest('tr'); const i = Number(tr.dataset.i); if (i === d.lines.length - 1) { const prev = d.lines[i]; d.lines.push({ qty: 1, price: 0, disc: 0, vat: prev.vat || defaultVat(side), acc: side === 'P' && !prev.itemId ? prev.acc : '', cc: prev.cc, desc: '' }); drawLines(); const nr = $$('tr[data-i]', tb)[i + 1]; if (nr) $('[data-l="desc"]', nr).focus(); } else { const nr = $$('tr[data-i]', tb)[i + 1]; const t = nr && $(`[data-l="${el.dataset.l}"]`, nr); if (t) t.focus(); } }));
+    $$('[data-job]', tb).forEach(b => b.onclick = () => { const i = +b.dataset.job; jobSplitDialog(d, i, async (jobs) => { d.lines[i].jobs = jobs; const stored = byId(coll, d.id); if (stored && stored.status !== 'draft') { const x = JSON.parse(JSON.stringify(stored)); x.lines[i].jobs = jobs; await store.save(coll, x, 'link-job'); toast('Job link saved'); } else saveDraftState(); drawLines(); }); });
     $$('[data-del]', tb).forEach(b => b.onclick = () => { d.lines.splice(Number(b.dataset.del), 1); if (!d.lines.length) d.lines.push({ qty: 1, price: 0, vat: defaultVat(side) }); drawLines(); });
     calcShow();
   }
@@ -1246,7 +1250,7 @@ function docEditor(m, side) {
     const c = calcDoc(d, side);
     // live hints: contact position, line accounts, stock & margin, cash after payment
     const hb = $('#ctHint'); if (hb) { const cc = contact(d.contactId); let h = cc ? contactHint(cc, side === 'S' ? 'S' : 'P', d.date) : ''; if (cc && side === 'S' && d.type === 'invoice' && d.status === 'draft' && num(cc.creditLimit)) { const after = r2(((hintData(d.date).ct[cc.id] || {}).ar || 0) + c.totalA); if (after > num(cc.creditLimit)) h += ' <span class="sep">·</span> <span class="neg"><b>Over credit limit after this invoice (AED ' + fmt(after) + ')</b></span>'; } if (side === 'P' && d.type === 'bill' && d.paidFrom) h += (h ? ' <span class="sep">·</span> ' : '') + esc(accName(d.paidFrom)) + ': ' + accHint(d.paidFrom, d.date, -c.totalA); hb.innerHTML = h; hb.style.display = h ? '' : 'none'; }
-    $$('tr[data-i]', tb).forEach((tr, i) => { const l = d.lines[i]; if (!l) return; const cl = c.lines[i]; const ha = $('[data-h="acc"]', tr); if (ha) ha.innerHTML = l.acc ? accHint(l.acc, d.date) : ''; const hi = $('[data-h="item"]', tr); if (hi) { const it = item(l.itemId); hi.innerHTML = it ? itemHint(it, side, num(l.qty) ? r2(cl.netA / num(l.qty)) : 0, l.qty) : ''; } });
+    $$('tr[data-i]', tb).forEach((tr, i) => { const l = d.lines[i]; if (!l) return; const cl = c.lines[i]; const ha = $('[data-h="acc"]', tr); if (ha) ha.innerHTML = l.acc ? accHint(l.acc, d.date) : ''; const hi = $('[data-h="item"]', tr); if (hi) { const it = item(l.itemId); hi.innerHTML = it && d.status === 'draft' ? itemHint(it, side, num(l.qty) ? r2(cl.netA / num(l.qty)) : 0, l.qty) : ''; } });
     $$('tr[data-i]', tb).forEach((tr, i) => { const cl = c.lines[i]; if (!cl) return; $('[data-o="net"]', tr).textContent = fmt(cl.net); $('[data-o="vat"]', tr).textContent = fmt(cl.vat); });
     const cur = d.currency || 'AED'; const fx = cur !== 'AED';
     $('#totals').innerHTML = `<table><tr><td>Subtotal (excl. VAT)</td><td class="n">${cur} ${fmt(c.net)}</td></tr>
@@ -1258,8 +1262,9 @@ function docEditor(m, side) {
   }
   drawLines();
   const form = $('.docform');
-  $$('.docform > .grid4 [data-k], .docbottom [data-k]').forEach(el => { if (ro && !['notes'].includes(el.dataset.k)) el.disabled = true; el.addEventListener('change', () => {
+  $$('.docform > .grid4 [data-k], .docbottom [data-k]').forEach(el => { if (ro && !(['notes'].includes(el.dataset.k) || (el.dataset.k === 'jobId' && d.status === 'posted'))) el.disabled = true; el.addEventListener('change', async () => {
     const k = el.dataset.k;
+    if (k === 'jobId') { d.jobId = el.value; const stored = byId(coll, d.id); if (stored && stored.status !== 'draft') { await store.save(coll, { ...stored, jobId: el.value }, 'link-job'); toast(el.value ? 'Bill linked to ' + (byId('sales', el.value) || {}).no : 'Job link removed'); } else saveDraftState(); drawLines(); return; }
     if (k === 'contactId' && el.value === NEWOPT) { el.value = d.contactId || ''; contactForm(null, (c) => { d.contactId = c.id; applyContact(c); saveDraftState(); docEditor(m, side); }, side === 'S' ? 'C' : 'S'); return; }
     d[k] = el.type === 'checkbox' ? el.checked : el.value;
     if (k === 'dueDate') d._dueManual = true;
@@ -1283,6 +1288,7 @@ function docEditor(m, side) {
   $('#back').onclick = () => { if (side === 'P' && d.type === 'bill') VIEW.tab = billKind(d); go(VIEW.page); };
   if ($('#addLine')) $('#addLine').onclick = () => { d.lines.push({ qty: 1, price: 0, disc: 0, vat: defaultVat(side), desc: '' }); drawLines(); };
   bindDocActions(d, side, isNew, coll);
+  if (side === 'S') profitPanel($('#profitHost'), byId(coll, d.id) || d);
   attachPanel($('#attHost'), () => d, async (list) => { d.attachments = list; const stored = byId(coll, d.id); if (stored) await store.save(coll, { ...stored, attachments: list }, 'attach'); else saveDraftState(); }, { readOnly: d.status === 'void', hint: side === 'P' ? 'Attach the supplier\u2019s tax invoice, delivery note or receipt – needed to support input VAT. PDF or photo, up to 8 MB.' : 'Attach the customer\u2019s PO, signed delivery note or other support. PDF or photo, up to 8 MB.' });
 }
 function docActions(d, side, isNew) {
@@ -1780,7 +1786,7 @@ function journalEditor(m) {
   if (!j) j = VIEW.params._draft || (VIEW.params._draft = { id: uid(), no: '', date: today(), memo: '', status: 'draft', lines: [{ acc: '', dr: '', cr: '' }, { acc: '', dr: '', cr: '' }] });
   j = JSON.parse(JSON.stringify(j)); const ro = j.status !== 'draft';
   m.innerHTML = pageHead((isNew ? 'New journal' : 'Journal ' + (j.no || '(draft)')), badge(j.status, j.status === 'posted' ? 'green' : 'grey') + (j.source ? ' · ' + esc(j.source) : ''), '<button class="btn" id="back">← Back</button>') +
-    `<div class="card jform"><div class="grid4">${field(['no', 'Number', 'text', { help: 'Auto on posting' }], j.no)}${field(['date', 'Date', 'date'], j.date)}${field(['reverseDate', 'Auto-reverse on (optional)', 'date', { help: 'For accruals' }], j.reverseDate)}${field(['memo', 'Narration', 'text'], j.memo)}</div>
+    `<div class="card jform"><div class="grid4">${field(['no', 'Number', 'text', { help: 'Auto on posting' }], j.no)}${field(['date', 'Date', 'date'], j.date)}${field(['reverseDate', 'Auto-reverse on (optional)', 'date', { help: 'For accruals' }], j.reverseDate)}${field(['memo', 'Narration', 'text'], j.memo)}${field(['jobId', 'For sales invoice (job costing)', 'select', { options: (v) => jobOptions(v), help: 'Expense lines of this journal count as costs of that invoice' }], j.jobId)}</div>
     <div class="tblwrap"><table class="tbl lines"><thead><tr><th style="width:26%">Account</th><th>Description</th><th style="width:16%">Contact</th>${S.data.costcenters.length ? '<th style="width:10%">Cost centre</th>' : ''}<th class="n" style="width:11%">Debit</th><th class="n" style="width:11%">Credit</th><th style="width:30px"></th></tr></thead><tbody id="jl"></tbody><tfoot><tr><td colspan="${S.data.costcenters.length ? 4 : 3}">Totals</td><td class="n" id="tdr"></td><td class="n" id="tcr"></td><td></td></tr></tfoot></table></div>
     ${ro ? '' : '<button class="btn sm" id="al">+ Add line</button>'}
     <div id="jmsg"></div>
@@ -2165,7 +2171,7 @@ PAGES['corporate-tax'] = (m) => {
 const REPORTS = [
   ['Financial statements (IFRS for SMEs)', [['fs', 'Complete set of financial statements', 'Financial position, comprehensive income, changes in equity, cash flows and notes with comparatives'], ['tb', 'Trial balance', 'Opening, movements and closing by account'], ['gl', 'General ledger', 'Account transactions with running balance'], ['daybook', 'Journal day book', 'All postings by entry'], ['trend', 'Monthly profit & loss', '12-month income statement trend'], ['ratios', 'Financial ratios & KPIs', 'Liquidity, profitability, efficiency, gearing']]],
   ['Receivables & payables', [['ar', 'Receivables ageing', 'By customer and bucket'], ['ap', 'Payables ageing', 'By supplier and bucket'], ['salescust', 'Sales by customer', 'Net sales and VAT'], ['salesitem', 'Sales by item', 'Quantity, revenue, cost and margin'], ['purchsupp', 'Purchases by supplier', 'Net purchases and VAT']]],
-  ['Operations', [['invval', 'Inventory valuation', 'Weighted-average cost vs selling price (NRV test)'], ['fareg', 'Fixed asset movement', 'Cost, depreciation and NBV by category'], ['payroll', 'Payroll summary', 'Monthly payroll costs'], ['budget', 'Budget vs actual', 'Variance analysis by account'], ['cc', 'Profit & loss by cost centre', 'Departmental / project profitability']]]
+  ['Operations', [['invval', 'Inventory valuation', 'Weighted-average cost vs selling price (NRV test)'], ['fareg', 'Fixed asset movement', 'Cost, depreciation and NBV by category'], ['payroll', 'Payroll summary', 'Monthly payroll costs'], ['jobprofit', 'Invoice profitability (job costing)', 'Profit and margin of every invoice after stock cost and linked expenses'], ['budget', 'Budget vs actual', 'Variance analysis by account'], ['cc', 'Profit & loss by cost centre', 'Departmental / project profitability']]]
 ];
 PAGES.reports = (m) => {
   const key = VIEW.sub; if (key && REPORT_FN[key]) return REPORT_FN[key](m);
@@ -2601,7 +2607,7 @@ async function importQuoteDesk(payload, opts) {
     const ct = await qdMatchContact(q.cust || {}, created); if (!ct) { created.skipped.push(qdNo(q) + ' (no customer)'); continue; }
     const c = qdCalc(q); const extra = c.sub ? c.disc / c.sub * 100 : 0; const vat = num(q.vat) >= 5 ? 'SR' : 'ZR';
     const lines = [];
-    for (const l of (q.lines || [])) { const it = await qdMatchItem(l, created); const d1 = num(l.disc); const disc = Math.round((1 - (1 - d1 / 100) * (1 - extra / 100)) * 100 * 10000) / 10000; lines.push({ itemId: it ? it.id : '', desc: (l.desc || '') + (l.details ? ' – ' + l.details : ''), qty: num(l.qty), price: num(l.price), disc: disc || 0, vat, acc: it ? '' : '4100' }); }
+    for (const l of (q.lines || [])) { const it = await qdMatchItem(l, created); const d1 = num(l.disc); const disc = Math.round((1 - (1 - d1 / 100) * (1 - extra / 100)) * 100 * 10000) / 10000; lines.push({ estCost: l.cost != null && l.cost !== '' ? num(l.cost) : null, itemId: it ? it.id : '', desc: (l.desc || '') + (l.details ? ' – ' + l.details : ''), qty: num(l.qty), price: num(l.price), disc: disc || 0, vat, acc: it ? '' : '4100' }); }
     const t = q.terms || {};
     const doc = { id: uid(), type: opts.as, no: '', date: opts.as === 'invoice' ? today() : (q.date || today()), status: opts.as === 'quote' ? 'posted' : 'draft', contactId: ct.id, currency: 'AED', rate: 1, emirate: ct.emirate || S.settings.emirate || 'DXB', reference: [q.ref, 'Quote ' + qdNo(q)].filter(Boolean).join(' · '), supplyDate: '', dueDate: opts.as === 'quote' ? addDays(q.date || today(), num(q.validDays) || 15) : addDays(today(), num(ct.terms ?? 30)), lines, notes: [q.subject, q.notes].filter(Boolean).join('\n'), terms: [t.payment ? 'Payment: ' + t.payment : '', t.delivery ? 'Delivery: ' + t.delivery : '', t.warranty ? 'Warranty: ' + t.warranty : ''].filter(Boolean).join('\n') || S.settings.invTerms, fromQuoteDesk: key };
     if (opts.as === 'quote') doc.no = nextNumber('qt');
@@ -2717,7 +2723,7 @@ async function qdBuildDoc(q, contactRec) {
   const cur = (q.cur && q.cur.code) || 'AED'; const rate = cur === 'AED' ? 1 : (num(q.rate) || rateFor(cur, q.date));
   const com = q.docType === 'Commercial Invoice'; const vat = com || !num(q.vat) ? 'ZR' : 'SR';
   const c = qdCalcFull(q); const extra = c.sub ? c.disc / c.sub * 100 : 0; const lines = [];
-  for (const l of (q.lines || [])) { const it = await qdEnsureItem(l); const d = Math.round((1 - (1 - num(l.disc) / 100) * (1 - extra / 100)) * 1e6) / 1e4; lines.push({ itemId: it ? it.id : '', desc: (l.desc || (it && it.name) || '') + (l.details ? ' – ' + l.details : ''), qty: num(l.qty), price: num(l.price), disc: d || 0, vat, acc: it ? '' : '4100' }); }
+  for (const l of (q.lines || [])) { const it = await qdEnsureItem(l); const d = Math.round((1 - (1 - num(l.disc) / 100) * (1 - extra / 100)) * 1e6) / 1e4; lines.push({ estCost: l.cost != null && l.cost !== '' ? num(l.cost) : null, itemId: it ? it.id : '', desc: (l.desc || (it && it.name) || '') + (l.details ? ' – ' + l.details : ''), qty: num(l.qty), price: num(l.price), disc: d || 0, vat, acc: it ? '' : '4100' }); }
   if (com && num(q.freight)) lines.push({ desc: 'Freight', qty: 1, price: num(q.freight), disc: 0, vat: 'ZR', acc: '4100' });
   if (com && num(q.insurance)) lines.push({ desc: 'Insurance', qty: 1, price: num(q.insurance), disc: 0, vat: 'ZR', acc: '4100' });
   const t = q.terms || {};
@@ -2871,6 +2877,111 @@ function attachPanel(host, getDoc, persist, opts = {}) {
   document.removeEventListener('paste', window._ccPaste || (() => { })); window._ccPaste = host._attPaste; document.addEventListener('paste', host._attPaste);
   draw();
 }
+
+/* ===================== Job costing: profitability of each sales invoice =====================
+   A sales invoice is a "job". Purchase and expense lines (and journal lines) can be linked to one or more invoices.
+   Linking is management information only – it never changes the ledger, so it can be done or changed at any time,
+   even after posting or in a locked period. Stock items sold already carry their cost (weighted average) to the job. */
+let _JC = null, _JCV = -1;
+function jobCostIndex() {
+  if (_JCV === LEDGER_VER && _JC) return _JC;
+  const idx = {}; const push = (jid, rec) => { (idx[jid] = idx[jid] || []).push(rec); };
+  S.data.purchases.filter(d => isLive(d) && ['bill', 'debit'].includes(d.type)).forEach(d => {
+    const c = calcDoc(d, 'P'); const sg = d.type === 'debit' ? -1 : 1;
+    d.lines.forEach((l, i) => {
+      if (tracksStock(l.itemId)) return; // stock reaches the job through cost of goods sold when sold
+      const cl = c.lines[i]; const amt = r2(sg * (cl.netA + (cl.code === 'SRN' ? cl.vatA : 0))); if (!amt) return;
+      const base = { src: 'purchases', docId: d.id, no: d.no, date: d.date, party: (docParty(d) || {}).name || '', desc: l.desc, line: i, kind: billKind(d) === 'purchase' ? 'Direct purchase' : 'Expense' };
+      if (l.jobs && l.jobs.length) { const tot = l.jobs.reduce((s, j) => s + num(j.amount), 0) || 1; l.jobs.forEach(j => push(j.docId, { ...base, amt: r2(amt * num(j.amount) / tot), split: l.jobs.length > 1 })); }
+      else if (d.jobId) push(d.jobId, { ...base, amt });
+    });
+  });
+  S.data.journals.filter(isLive).forEach(j => j.lines.forEach((l, i) => {
+    const jid = l.jobId || j.jobId; if (!jid) return; const a = acc(l.acc); if (!a || a.type !== 'X') return;
+    const amt = r2(num(l.dr) - num(l.cr)); if (amt) push(jid, { src: 'journals', docId: j.id, no: j.no, date: j.date, party: '', desc: l.desc || j.memo, line: i, kind: 'Journal', amt });
+  }));
+  _JC = idx; _JCV = LEDGER_VER; return idx;
+}
+function invoiceProfit(inv) {
+  const INV = L().INV; const c = calcDoc(inv, 'S');
+  let rev = c.netA, cogs = 0, est = 0, hasEst = false;
+  inv.lines.forEach((l, i) => { if (tracksStock(l.itemId)) cogs += INV.cost[inv.id + ':' + i] || 0; if (l.estCost != null && l.estCost !== '') { hasEst = true; est += num(l.qty) * num(l.estCost) * (num(inv.rate) || 1); } });
+  const cns = S.data.sales.filter(x => isLive(x) && x.type === 'credit' && x.againstId === inv.id);
+  cns.forEach(cn => { rev -= calcDoc(cn, 'S').netA; if (cn.returnStock !== false) cn.lines.forEach((l, i) => { if (tracksStock(l.itemId)) cogs -= INV.cost[cn.id + ':' + i] || 0; }); });
+  const list = (jobCostIndex()[inv.id] || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const costs = r2(list.reduce((s, x) => s + x.amt, 0)); rev = r2(rev); cogs = r2(cogs);
+  const gp = r2(rev - cogs - costs);
+  return { rev, cogs, costs, list, gp, pct: rev ? gp / rev * 100 : 0, credits: cns.length, est: hasEst ? r2(est) : null, estPct: hasEst && c.netA ? (c.netA - est) / c.netA * 100 : null };
+}
+const jobLabel = (d) => { const c = docParty(d); return d.no + ' · ' + (c ? c.name : '') + ' · ' + fmtD(d.date); };
+function jobInvoices() { return S.data.sales.filter(d => d.type === 'invoice' && d.status === 'posted').sort((a, b) => (b.date + b.no).localeCompare(a.date + a.no)); }
+function jobOptions(sel, blank = '— not linked —') { return opt('', blank, sel) + jobInvoices().map(d => opt(d.id, jobLabel(d) + ' · ' + (d.currency || 'AED') + ' ' + fmt(calcDoc(d, 'S').total), sel)).join(''); }
+
+/* Split one bill line across several invoices (e.g. one container's freight shared by three orders) */
+function jobSplitDialog(d, i, onDone) {
+  const l = d.lines[i]; const c = calcDoc(d, 'P'); const lineAmt = r2(c.lines[i].netA); let rows = (l.jobs && l.jobs.length) ? l.jobs.map(j => ({ ...j })) : (d.jobId ? [{ docId: d.jobId, amount: lineAmt }] : [{ docId: '', amount: lineAmt }]);
+  const body = () => `<p class="muted">Line: <b>${esc(l.desc || '')}</b> · AED ${fmt(lineAmt)} (excl. recoverable VAT). Share it between invoices by amount; the split is applied proportionally if the line amount changes later.</p>
+    <table class="tbl"><thead><tr><th>Sales invoice</th><th class="n" style="width:160px">Amount (AED)</th><th></th></tr></thead><tbody>${rows.map((r, k) => `<tr><td><select data-sj="${k}">${jobOptions(r.docId, '— choose invoice —')}</select></td><td><input class="num" data-sa="${k}" value="${r.amount}"></td><td><button class="iconbtn sm" data-sx="${k}">${ico('M6 6l12 12M18 6L6 18', 14)}</button></td></tr>`).join('')}</tbody></table>
+    <div class="toolbar"><button class="btn sm" id="sjAdd">+ Add invoice</button><button class="btn sm" id="sjEven">Split evenly</button><span class="grow"></span><span id="sjSum" class="muted"></span></div>`;
+  const w = modal('Link line to invoices', body(), [{ label: 'Remove link', cls: 'ghost', onClick: () => { onDone([]); } }, { label: 'Cancel' }, { label: 'Save', cls: 'primary', onClick: () => { const out = rows.filter(r => r.docId && num(r.amount) > 0).map(r => ({ docId: r.docId, amount: r2(num(r.amount)) })); const t = r2(out.reduce((s, r) => s + r.amount, 0)); if (Math.abs(t - lineAmt) > 0.01 && lineAmt) { toast('Amounts add up to ' + fmt(t) + ' – they must equal the line (' + fmt(lineAmt) + ')', 'err'); return false; } onDone(out); } }], { wide: true });
+  const wire = (el) => {
+    const sum = () => { const t = r2(rows.reduce((s, r) => s + num(r.amount), 0)); $('#sjSum', el).innerHTML = 'Allocated ' + fmt(t) + ' of ' + fmt(lineAmt) + (Math.abs(t - lineAmt) > 0.01 ? ' <b class="neg">– difference ' + fmt(lineAmt - t) + '</b>' : ' ✓'); };
+    $$('[data-sj]', el).forEach(s => s.onchange = () => { rows[+s.dataset.sj].docId = s.value; });
+    $$('[data-sa]', el).forEach(s => s.oninput = () => { rows[+s.dataset.sa].amount = s.value; sum(); });
+    $$('[data-sx]', el).forEach(b => b.onclick = () => { rows.splice(+b.dataset.sx, 1); if (!rows.length) rows.push({ docId: '', amount: lineAmt }); redraw(); });
+    $('#sjAdd', el).onclick = () => { const left = r2(lineAmt - rows.reduce((s, r) => s + num(r.amount), 0)); rows.push({ docId: '', amount: left > 0 ? left : 0 }); redraw(); };
+    $('#sjEven', el).onclick = () => { const n = rows.length; let acc = 0; rows.forEach((r, k) => { r.amount = k === n - 1 ? r2(lineAmt - acc) : r2(lineAmt / n); acc = r2(acc + r.amount); }); redraw(); };
+    sum();
+  };
+  const redraw = () => { $('.mbody', w.el).innerHTML = body(); wire(w.el); };
+  wire(w.el);
+}
+
+/* Profitability panel on a posted sales invoice */
+function profitPanel(host, inv) {
+  if (!host || inv.status !== 'posted' || inv.type !== 'invoice') { if (host) host.innerHTML = ''; return; }
+  const P = invoiceProfit(inv);
+  host.innerHTML = `<div class="profit"><div class="atthead"><h3>Job profitability</h3><span class="muted small">Revenue less cost of goods sold and the purchases / expenses linked to this invoice (management view – does not change the ledger).</span></div>
+  <div class="pgrid"><div><span>Revenue (net${P.credits ? ', after credit notes' : ''})</span><b>${fmt(P.rev)}</b></div><div><span>Cost of goods sold (stock)</span><b>${fmtS(-P.cogs)}</b></div><div><span>Linked direct costs</span><b>${fmtS(-P.costs)}</b></div><div class="${P.gp < 0 ? 'neg' : 'pos'}"><span>Job profit</span><b>${fmt(P.gp)}</b></div><div><span>Margin</span><b class="${P.pct < 0 ? 'neg' : P.pct < 10 ? 'warnt' : 'pos'}">${P.rev ? P.pct.toFixed(1) + '%' : '–'}</b></div>${P.est != null ? `<div><span>Quoted margin (Quote Desk costs)</span><b>${P.estPct.toFixed(1)}%</b></div>` : ''}</div>
+  ${P.list.length ? `<table class="tbl compact"><thead><tr><th>Date</th><th>Document</th><th>Type</th><th>Supplier</th><th>Description</th><th class="n">AED</th></tr></thead><tbody>${P.list.map(x => `<tr class="click" data-jo="${x.src}|${x.docId}"><td>${fmtD(x.date)}</td><td>${esc(x.no || '')}</td><td>${esc(x.kind)}${x.split ? ' (share)' : ''}</td><td>${esc(x.party)}</td><td>${esc(x.desc || '')}</td><td class="n">${fmt(x.amt)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">No costs linked yet.</p>'}
+  <div class="toolbar" style="margin-top:6px"><button class="btn sm" id="jLink">🔗 Link existing costs…</button><button class="btn sm" id="jNewPur">+ Purchase for this job</button><button class="btn sm" id="jNewExp">+ Expense for this job</button></div></div>`;
+  $$('[data-jo]', host).forEach(tr => tr.onclick = () => { const [src, id] = tr.dataset.jo.split('|'); go(src === 'journals' ? 'journals' : 'purchases', 'edit', id); });
+  $('#jLink', host).onclick = () => linkCostsDialog(inv);
+  const nb = (kind) => { const d = blankDoc('P', 'bill', { billKind: kind }); d.jobId = inv.id; VIEW.tab = kind; go('purchases', 'edit', null, { _draft: d }); };
+  $('#jNewPur', host).onclick = () => nb('purchase'); $('#jNewExp', host).onclick = () => nb('expense');
+}
+/* Pick unlinked purchase / expense lines and link them to this invoice */
+function linkCostsDialog(inv) {
+  const from = addDays(inv.date, -120), to = addDays(inv.date, 120);
+  const cands = []; S.data.purchases.filter(d => isLive(d) && d.type === 'bill' && d.date >= from && d.date <= to).forEach(d => { const c = calcDoc(d, 'P'); d.lines.forEach((l, i) => { if (tracksStock(l.itemId)) return; const linked = (l.jobs && l.jobs.length) || d.jobId; cands.push({ d, i, l, amt: r2(c.lines[i].netA + (c.lines[i].code === 'SRN' ? c.lines[i].vatA : 0)), linked, mine: (l.jobs || []).some(j => j.docId === inv.id) || (!(l.jobs && l.jobs.length) && d.jobId === inv.id) }); }); });
+  cands.sort((a, b) => (a.linked - b.linked) || Math.abs(daysBetween(a.d.date, inv.date)) - Math.abs(daysBetween(b.d.date, inv.date)));
+  modal('Link costs to ' + inv.no, `<p class="muted">Purchases and expenses dated within 4 months of ${fmtD(inv.date)}. Tick the lines that belong to this job. Lines already linked elsewhere are shown greyed – use Split on the bill to share them.</p>
+  <div class="tblwrap" style="max-height:55vh"><table class="tbl compact"><thead><tr><th></th><th>Date</th><th>Bill</th><th>Supplier</th><th>Description</th><th class="n">AED</th><th>Linked to</th></tr></thead><tbody>${cands.map((x, k) => { const other = x.linked && !x.mine; const to = other ? ((x.l.jobs && x.l.jobs.length) ? x.l.jobs.map(j => (byId('sales', j.docId) || {}).no).join(', ') : (byId('sales', x.d.jobId) || {}).no) : ''; return `<tr class="${other ? 'muted' : ''}"><td><input type="checkbox" data-lc="${k}" ${x.mine ? 'checked' : ''} ${other ? 'disabled' : ''}></td><td>${fmtD(x.d.date)}</td><td>${esc(x.d.no)}</td><td>${esc((docParty(x.d) || {}).name || '')}</td><td>${esc(x.l.desc || '')}</td><td class="n">${fmt(x.amt)}</td><td>${esc(to || '')}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">No purchases or expenses around this date.</td></tr>'}</tbody></table></div>`,
+  [{ label: 'Cancel' }, { label: 'Save links', cls: 'primary', onClick: async (w) => {
+    const changes = new Map();
+    $$('[data-lc]', w).forEach(cb => { const x = cands[+cb.dataset.lc]; if (cb.disabled || cb.checked === x.mine) return; const doc = changes.get(x.d.id) || JSON.parse(JSON.stringify(byId('purchases', x.d.id))); changes.set(x.d.id, doc); const ln = doc.lines[x.i];
+      if (cb.checked) ln.jobs = [{ docId: inv.id, amount: x.amt }];
+      else { if (ln.jobs && ln.jobs.length) ln.jobs = ln.jobs.filter(j => j.docId !== inv.id); else if (doc.jobId === inv.id) { doc.lines.forEach((l2, k2) => { if (k2 !== x.i && !tracksStock(l2.itemId) && !(l2.jobs && l2.jobs.length)) l2.jobs = [{ docId: inv.id, amount: 1 }]; }); doc.jobId = ''; ln.jobs = []; } } });
+    for (const doc of changes.values()) await store.save('purchases', doc, 'link-job');
+    toast(changes.size ? 'Links saved' : 'No changes'); render();
+  } }], { xwide: true });
+}
+
+/* Report: profitability of every invoice */
+REPORT_FN.jobprofit = (m) => {
+  const { from, to } = periodFromParams(); const by = VIEW.params.by || 'invoice';
+  const invs = S.data.sales.filter(d => d.type === 'invoice' && d.status === 'posted' && d.date >= from && d.date <= to);
+  let rows = invs.map(d => { const P = invoiceProfit(d); const c = docParty(d); return { d, no: d.no, date: d.date, party: c ? c.name : '', rev: P.rev, cogs: P.cogs, costs: P.costs, gp: P.gp, pct: P.rev ? P.pct : null, est: P.estPct, n: P.list.length }; });
+  if (by === 'customer') { const g = {}; rows.forEach(r => { const k = r.party || '?'; const x = g[k] || (g[k] = { party: k, no: 0, rev: 0, cogs: 0, costs: 0, gp: 0 }); x.no++; x.rev += r.rev; x.cogs += r.cogs; x.costs += r.costs; x.gp += r.gp; }); rows = Object.values(g).map(x => ({ ...x, rev: r2(x.rev), cogs: r2(x.cogs), costs: r2(x.costs), gp: r2(x.gp), pct: x.rev ? x.gp / x.rev * 100 : null })); }
+  const sort = VIEW.params.sort || 'gp'; rows.sort((a, b) => sort === 'pct' ? (a.pct ?? 0) - (b.pct ?? 0) : sort === 'date' ? (a.date || '').localeCompare(b.date || '') : b[sort] - a[sort]);
+  const T = { rev: r2(rows.reduce((s, r) => s + r.rev, 0)), cogs: r2(rows.reduce((s, r) => s + r.cogs, 0)), costs: r2(rows.reduce((s, r) => s + r.costs, 0)) }; T.gp = r2(T.rev - T.cogs - T.costs);
+  const plAll = balances(to, from); const cosTotal = r2(sumGroup(plAll, a => a.grp === 'cos')); const unalloc = r2(cosTotal - T.cogs - rows.reduce((s, r) => s + 0, 0) - (() => { let x = 0; Object.values(jobCostIndex()).forEach(list => list.forEach(c => { if (c.date >= from && c.date <= to) { const d = byId(c.src, c.docId); if (d && c.src === 'purchases' && billKind(d) === 'purchase') x += c.amt; } })); return x; })());
+  const cols = by === 'customer' ? [{ k: 'party', l: 'Customer' }, { k: 'no', l: 'Invoices' }] : [{ k: 'no', l: 'Invoice' }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'party', l: 'Customer' }];
+  const body = `<div class="kpis sm"><div class="kpi"><span>Revenue</span><b>${fmt(T.rev)}</b></div><div class="kpi"><span>Cost of goods sold</span><b>${fmt(T.cogs)}</b></div><div class="kpi"><span>Linked direct costs</span><b>${fmt(T.costs)}</b></div><div class="kpi"><span>Job profit</span><b class="${T.gp < 0 ? 'neg' : 'pos'}">${fmt(T.gp)}</b></div><div class="kpi"><span>Average margin</span><b>${T.rev ? (T.gp / T.rev * 100).toFixed(1) + '%' : '–'}</b></div></div>` +
+    dataTable([...cols, { k: 'rev', l: 'Revenue', num: 1 }, { k: 'cogs', l: 'COGS', num: 1 }, { k: 'costs', l: 'Direct costs', num: 1 }, { k: 'gp', l: 'Profit', num: 1 }, { k: 'pct', l: 'Margin', num: 1, html: r => r.pct == null ? '' : `<span class="${r.pct < 0 ? 'neg' : r.pct < 10 ? 'warnt' : ''}">${r.pct.toFixed(1)}%</span>` }, ...(by === 'invoice' ? [{ k: 'est', l: 'Quoted margin', num: 1, fmt: v => v == null ? '' : v.toFixed(1) + '%' }, { k: 'n', l: 'Linked costs' }] : [])], rows, { totals: ['rev', 'cogs', 'costs', 'gp'], onRow: r => r.d && go('sales', 'edit', r.d.id), empty: 'No posted invoices in this period.' }) +
+    `<p class="muted small">Profit = net revenue (after credit notes) − weighted-average cost of stock sold − purchases, expenses and journal lines linked to the invoice. Overheads such as rent and salaries are not allocated, so job profits add up to more than the company's net profit. Cost-of-sales postings in the period not traced to any invoice: <b>AED ${fmt(Math.max(0, unalloc))}</b>${unalloc > 0.5 ? ' – link them from each invoice’s "Link existing costs" for a complete picture.' : '.'}</p>`;
+  repShell(m, 'Invoice profitability (job costing)', periodCtl(from, to) + `<select data-rp="by">${opt('invoice', 'By invoice', by)}${opt('customer', 'By customer', by)}</select><select data-rp="sort">${[['gp', 'Sort: profit'], ['pct', 'Sort: lowest margin first'], ['rev', 'Sort: revenue'], ['date', 'Sort: date']].map(([k, l]) => opt(k, l, sort)).join('')}</select>`, body, 'Invoice_profitability_' + to);
+};
 
 /* ===================== Demo data & boot ===================== */
 async function seedDemo() {
