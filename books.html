@@ -91,6 +91,11 @@ textarea.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
 
 .toast{background:#14305F}.coname{font-family:var(--f-display);color:var(--acc)}.cover .cvlogo img{width:180px;height:auto}
 body.locked #side,body.locked .search,body.locked .quick,body.locked #menuBtn{display:none!important}.qdpanel{border-left:4px solid var(--mag)}#whoBox{color:#d6deee;margin-top:6px;word-break:break-all}
+.attpanel{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.atthead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.atthead h3{margin:4px 0}
+.attlist{display:flex;flex-direction:column;gap:6px;margin:8px 0}.att{display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fafbfd}.attname{border:0;background:none;color:var(--acc);font:inherit;font-weight:600;cursor:pointer;text-align:left;padding:0}.attname:hover{text-decoration:underline}.att .muted{margin-left:auto}
+.attdrop{display:flex;align-items:center;justify-content:center;border:1.5px dashed #b9c3d6;border-radius:10px;padding:14px;cursor:pointer;color:var(--ink2);background:#fbfcfe}.attdrop:hover,.attdrop.over{border-color:var(--mag);background:var(--accl)}
+.lh{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.25;white-space:normal}.lh:empty{display:none}.warnt{color:var(--amb)!important}
+.hintbar{background:#f4f6fb;border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:8px;padding:7px 12px;margin:2px 0 12px;font-size:12.5px;color:var(--ink2);line-height:1.6}.hintbar:empty{display:none}.hintbar .sep{color:#b8c0cf;margin:0 2px}
 </style></head><body>
 <script>var BOOKS_TARGET = 'firebase';
 /* CityCube brand assets (from the CityCube Quote Desk letterhead) */
@@ -876,7 +881,7 @@ function accOptions(sel, filter, blank = true) {
   return (blank ? opt('', typeof blank === 'string' ? blank : '— select account —', sel) : '') + list.map(a => opt(a.code, a.code + ' · ' + a.name, sel)).join('');
 }
 const bankAccs = () => S.data.accounts.filter(a => a.grp === 'cash' && a.active !== false);
-function bankOptions(sel) { return bankAccs().map(a => opt(a.code, a.code + ' · ' + a.name, sel)).join(''); }
+function bankOptions(sel) { let H = null; try { H = hintData(); } catch (e) { } return bankAccs().map(a => opt(a.code, a.code + ' · ' + a.name + (H ? ' (AED ' + fmt(H.bal[a.code] || 0) + ')' : ''), sel)).join(''); }
 const NEWOPT = '__new__';
 function contactOptions(sel, kind) { return opt('', '— select —', sel) + opt(NEWOPT, kind === 'S' ? '➕ Add new supplier…' : kind === 'C' ? '➕ Add new customer…' : '➕ Add new contact…', '') + S.data.contacts.filter(c => c.active !== false && (!kind || (kind === 'C' ? c.isCustomer : c.isSupplier))).sort((a, b) => a.name.localeCompare(b.name)).map(c => opt(c.id, c.name, sel)).join(''); }
 function itemOptions(sel, withNew) { return opt('', '— free text —', sel) + (withNew ? opt(NEWOPT, '➕ Add new item…', '') : '') + S.data.items.filter(i => i.active !== false).sort((a, b) => (a.sku || '').localeCompare(b.sku || '')).map(i => opt(i.id, (i.sku ? i.sku + ' · ' : '') + i.name, sel)).join(''); }
@@ -1032,6 +1037,54 @@ function barChart(data, opts = {}) {
   </svg><div class="legend"><span><i class="s1"></i>${esc(opts.la || 'A')}</span><span><i class="s2"></i>${esc(opts.lb || 'B')}</span></div>`;
 }
 
+/* ===================== Live balance hints shown while entering documents ===================== */
+let _hintCache = { v: -1, d: '', bal: null, pl: null, ct: null };
+function hintData(asOf) {
+  asOf = asOf || today();
+  if (_hintCache.v === LEDGER_VER && _hintCache.d === asOf) return _hintCache;
+  const bal = balances(asOf), pl = balances(asOf, fyStartOf(asOf)); const ct = {};
+  const ar = sysCode('AR') || '1200', ap = sysCode('AP') || '2100';
+  L().lines.forEach(l => { if (!l.contactId || l.date > asOf) return; const r = ct[l.contactId] || (ct[l.contactId] = { ar: 0, ap: 0 }); if (l.acc === ar) r.ar += l.amt; if (l.acc === ap) r.ap -= l.amt; });
+  _hintCache = { v: LEDGER_VER, d: asOf, bal, pl, ct }; return _hintCache;
+}
+const drcr = (b) => Math.abs(b) < 0.005 ? 'AED 0.00' : 'AED ' + fmt(Math.abs(b)) + (b > 0 ? ' Dr' : ' Cr');
+function accHint(code, asOf, delta) {
+  const a = acc(code); if (!a) return '';
+  const H = hintData(asOf); const isPL = a.type === 'I' || a.type === 'X';
+  const b = r2((isPL ? H.pl[code] : H.bal[code]) || 0);
+  let s = (isPL ? 'This year ' : a.grp === 'cash' ? 'Available ' : 'Balance ') + drcr(b);
+  if (delta) { const after = r2(b + delta); s += ' → after ' + drcr(after); if (a.grp === 'cash' && after < -0.005) return `<span class="neg">${s} · overdrawn</span>`; }
+  return s;
+}
+function contactHint(c, side, asOf) {
+  if (!c) return '';
+  const H = hintData(asOf); const r = H.ct[c.id] || { ar: 0, ap: 0 }; const parts = [];
+  const isS = side === 'S';
+  const balAmt = r2(isS ? r.ar : r.ap);
+  parts.push(`<b>${isS ? 'Receivable' : 'Payable'}: AED ${fmt(balAmt)}</b>`);
+  const docs = (isS ? S.data.sales : S.data.purchases).filter(d => d.contactId === c.id && d.status === 'posted' && ['invoice', 'bill'].includes(d.type));
+  let od = 0, odn = 0; docs.forEach(d => { const o = openAmount(d); if (o > 0.005 && d.dueDate && d.dueDate < today()) { od += o * (num(d.rate) || 1); odn++; } });
+  if (odn) parts.push(`<span class="neg">${odn} overdue · AED ${fmt(od)}</span>`);
+  const un = S.data.payments.filter(p => p.status === 'posted' && p.contactId === c.id && p.kind === (isS ? 'receipt' : 'payment') && !p.bouncedDate).reduce((s, p) => s + r2(num(p.amount) - (p.allocations || []).reduce((t, a) => t + payAmt(a), 0)) * (num(p.rate) || 1), 0);
+  if (un > 0.005) parts.push(`<span class="pos">On account AED ${fmt(un)} – can be allocated</span>`);
+  if (isS && num(c.creditLimit)) { const pct = balAmt / num(c.creditLimit) * 100; parts.push(`<span class="${pct > 100 ? 'neg' : pct > 80 ? 'warnt' : ''}">Credit limit AED ${fmt(c.creditLimit)} (${pct.toFixed(0)}% used)</span>`); }
+  const pdc = S.data.payments.filter(p => p.status === 'posted' && p.contactId === c.id && p.method === 'pdc' && !p.clearedDate && !p.bouncedDate).reduce((s, p) => s + num(p.amount) * (num(p.rate) || 1), 0);
+  if (pdc) parts.push(`PDCs pending AED ${fmt(pdc)}`);
+  const last = docs.sort((a, b) => b.date.localeCompare(a.date))[0]; if (last) parts.push(`Last ${isS ? 'invoice' : 'bill'} ${esc(last.no)} · ${fmtD(last.date)}`);
+  if (!c.trn && c.vatRegistered) parts.push('<span class="neg">TRN missing</span>');
+  return parts.join(' <span class="sep">·</span> ');
+}
+function itemHint(it, side, priceAED, qty) {
+  if (!it || it.type !== 'goods') return it ? 'Service' : '';
+  const s = L().INV.st[it.id] || { qty: 0, val: 0 }; const avg = s.qty > 0 ? s.val / s.qty : num(it.cost);
+  let t = `On hand ${fmt(s.qty, s.qty % 1 ? 2 : 0)} ${esc(it.unit || '')} · avg cost ${fmt(avg)}`;
+  if (side === 'S') {
+    if (num(qty) > s.qty + 0.0001) t += ` · <span class="neg">only ${fmt(s.qty, 0)} in stock</span>`;
+    if (priceAED > 0 && avg > 0) { const m = (1 - avg / priceAED) * 100; t += m < 0 ? ` · <span class="neg">below cost (${m.toFixed(1)}%)</span>` : ` · margin ${m.toFixed(1)}%`; }
+  } else if (priceAED > 0 && avg > 0 && Math.abs(priceAED / avg - 1) > 0.15) t += ` · <span class="warnt">${priceAED > avg ? '+' : ''}${((priceAED / avg - 1) * 100).toFixed(0)}% vs average cost</span>`;
+  return t;
+}
+
 /* Print / PDF stylesheet for invoices, vouchers, payslips and report exports */
 const PRINT_CSS = `
 .inv{font:12px/1.45 'Source Sans 3',Arial,"Noto Sans Arabic",sans-serif;color:#14232c;padding:28px 30px;position:relative;background:#fff}
@@ -1083,7 +1136,7 @@ function docListPage(m, side) {
     (side === 'S' ? qdPanel() : '') + tabs(side === 'P' ? P_TABS : Object.entries(T).filter(([k]) => tabKeys.includes(k)).map(([k, v]) => [k, v[0] + 's']), tab) +
     `<div class="kpis sm"><div class="kpi"><span>Documents</span><b>${rows.length}</b></div><div class="kpi"><span>Outstanding (AED)</span><b>${fmt(out)}</b></div><div class="kpi"><span>Overdue (AED)</span><b class="${overdue > 0 ? 'neg' : ''}">${fmt(overdue)}</b></div><div class="kpi"><span>Total value (AED)</span><b>${fmt(rows.filter(r => r.d.status === 'posted').reduce((s, r) => s + r.totalA, 0))}</b></div></div>
     <div class="card"><div class="toolbar"><input id="dq" placeholder="Filter by number, party, reference" value="${esc(VIEW.params.q || '')}"><select id="df">${['all', 'draft', 'unpaid', 'partpaid', 'overdue', 'paid', 'posted', 'void', 'open'].map(x => opt(x, x === 'all' ? 'All statuses' : x === 'partpaid' ? 'Part paid' : x[0].toUpperCase() + x.slice(1), f)).join('')}</select><span class="grow"></span>${exportBar('#docTbl', (side === 'S' ? 'Sales_' : 'Purchases_') + tab)}</div>
-    ${dataTable([{ k: 'no', l: 'Number' }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }, { k: 'x', l: '', cls: 'noprint', html: r => r.open > 0.005 ? `<button class="btn sm" data-qpay="${r.d.id}">${side === 'S' ? 'Receive' : 'Pay'}</button>` : '' }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
+    ${dataTable([{ k: 'no', l: 'Number', fmt: (v, r) => (v || 'Draft') + ((r.d.attachments || []).length ? ' 📎' : '') }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }, { k: 'x', l: '', cls: 'noprint', html: r => r.open > 0.005 ? `<button class="btn sm" data-qpay="${r.d.id}">${side === 'S' ? 'Receive' : 'Pay'}</button>` : '' }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
   $$('[data-tab]', m).forEach(b => b.onclick = () => { VIEW.tab = b.dataset.tab; VIEW.params = {}; render(); });
   $$('[data-qpay]', m).forEach(b => b.onclick = (e) => { e.stopPropagation(); const d = byId(coll, b.dataset.qpay); go('banking', 'edit', null, { kind: side === 'S' ? 'receipt' : 'payment', contactId: d.contactId, allocate: d.id }); });
   if ($('#newDoc')) $('#newDoc').onclick = () => go(VIEW.page, 'edit', null, { type: dtype });
@@ -1137,9 +1190,10 @@ function docEditor(m, side) {
       ${(d.type === 'credit' || d.type === 'debit') ? field(['reason', 'Reason for adjustment', 'text', { help: 'Shown on the tax credit note' }], d.reason) : ''}
       ${d.type === 'credit' ? field(['returnStock', 'Goods returned to stock', 'check'], d.returnStock !== false) : ''}
       ${S.data.costcenters.length ? field(['cc', 'Cost centre / project', 'select', { options: ccOptions }], d.cc) : ''}
-      ${side === 'P' && d.type === 'bill' ? field(['paidFrom', 'Payment', 'select', { options: (v) => opt('', 'Not paid yet – on credit', v) + bankAccs().map(a => opt(a.code, 'Paid now from ' + a.name, v)).join(''), help: d.paidFrom ? 'Saved as paid – no separate payment voucher needed' : 'Record the payment later with the Pay button' }], d.paidFrom) : ''}
+      ${side === 'P' && d.type === 'bill' ? field(['paidFrom', 'Payment', 'select', { options: (v) => opt('', 'Not paid yet – on credit', v) + bankAccs().map(a => opt(a.code, 'Paid now from ' + a.name + ' (AED ' + fmt(hintData().bal[a.code] || 0) + ')', v)).join(''), help: d.paidFrom ? 'Saved as paid – no separate payment voucher needed' : 'Record the payment later with the Pay button' }], d.paidFrom) : ''}
       ${side === 'P' && d.type === 'bill' && d.paidFrom ? field(['paidDate', 'Payment date', 'date'], d.paidDate || d.date) : ''}
     </div>
+    <div class="hintbar" id="ctHint"></div>
     ${ct && side === 'S' && ct.vatRegistered && !ct.trn ? '<div class="alert warn">This customer is marked VAT-registered but has no TRN. The recipient TRN must appear on a full tax invoice.</div>' : ''}
     ${!S.settings.trn && side === 'S' && d.type !== 'quote' ? '<div class="alert warn">Your company TRN is not set (Company & Settings). A tax invoice must show the supplier TRN.</div>' : ''}
     <div class="tblwrap"><table class="tbl lines" id="lines"><thead><tr>${showItem ? '<th style="width:16%">Item</th>' : ''}<th>Description</th><th class="n" style="width:7%">Qty</th><th class="n" style="width:9%">Unit ${side === 'P' ? 'cost' : 'price'}</th><th class="n" style="width:6%">Disc %</th><th style="width:14%">VAT</th>${showAcc ? `<th style="width:16%">${side === 'S' ? 'Income account' : 'Expense account'}</th>` : ''}<th class="n" style="width:9%">Amount</th><th class="n" style="width:7%">VAT</th><th style="width:30px"></th></tr></thead><tbody></tbody></table></div>
@@ -1148,6 +1202,7 @@ function docEditor(m, side) {
       ${field(['notes', side === 'S' ? 'Notes (shown on document)' : 'Internal notes', 'textarea', { rows: 2 }], d.notes)}
       ${side === 'S' ? field(['terms', 'Terms & conditions', 'textarea', { rows: 2 }], d.terms) : ''}
     </div><div class="totals" id="totals"></div></div>
+    <div id="attHost"></div>
     <div class="docact">${docActions(d, side, isNew)}</div>
     ${!isNew ? `<div class="meta">Created ${d.createdAt ? new Date(d.createdAt).toLocaleString() : ''} · Last change ${d.updatedAt ? new Date(d.updatedAt).toLocaleString() : ''}</div>` : ''}
   </div>`;
@@ -1155,13 +1210,13 @@ function docEditor(m, side) {
   const tb = $('#lines tbody');
   function drawLines() {
     tb.innerHTML = d.lines.map((l, i) => `<tr data-i="${i}">
-      ${showItem ? `<td><select data-l="itemId">${itemOptions(l.itemId, !ro)}</select></td>` : ''}
+      ${showItem ? `<td><select data-l="itemId">${itemOptions(l.itemId, !ro)}</select><div class="lh" data-h="item"></div></td>` : ''}
       <td><input data-l="desc" value="${esc(l.desc)}" placeholder="Description of goods / services"></td>
       <td><input data-l="qty" class="num" value="${esc(l.qty)}"></td>
       <td><input data-l="price" class="num" value="${esc(l.price)}"></td>
       <td><input data-l="disc" class="num" value="${esc(l.disc || '')}"></td>
       <td><select data-l="vat">${Object.entries(codes).map(([k, v]) => opt(k, v.label, l.vat)).join('')}</select></td>
-      ${showAcc ? `<td><select data-l="acc">${accOptions(l.acc, a => side === 'S' ? (a.type === 'I') : (a.type === 'X' || a.type === 'A'), tracksStock(l.itemId) ? (side === 'S' ? 'Item default (revenue)' : 'Inventory (stock item)') : l.itemId && side === 'S' ? 'Item default (revenue)' : '— select account —')}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select></td>` : ''}
+      ${showAcc ? `<td><select data-l="acc">${accOptions(l.acc, a => side === 'S' ? (a.type === 'I') : (a.type === 'X' || a.type === 'A'), tracksStock(l.itemId) ? (side === 'S' ? 'Item default (revenue)' : 'Inventory (stock item)') : l.itemId && side === 'S' ? 'Item default (revenue)' : '— select account —')}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select><div class="lh" data-h="acc"></div></td>` : ''}
       <td class="n" data-o="net"></td><td class="n" data-o="vat"></td>
       <td>${ro ? '' : `<button class="iconbtn sm" data-del="${i}" title="Remove">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
     if (ro) $$('input,select', tb).forEach(x => x.disabled = true);
@@ -1186,6 +1241,9 @@ function docEditor(m, side) {
   function defaultVat(side) { const c = contact(d.contactId); if (c && c.defaultVat) return c.defaultVat; if (c && c.country && c.country !== 'AE' && c.country !== 'United Arab Emirates') return side === 'S' ? 'ZR' : 'RC'; return 'SR'; }
   function calcShow() {
     const c = calcDoc(d, side);
+    // live hints: contact position, line accounts, stock & margin, cash after payment
+    const hb = $('#ctHint'); if (hb) { const cc = contact(d.contactId); let h = cc ? contactHint(cc, side === 'S' ? 'S' : 'P', d.date) : ''; if (cc && side === 'S' && d.type === 'invoice' && d.status === 'draft' && num(cc.creditLimit)) { const after = r2(((hintData(d.date).ct[cc.id] || {}).ar || 0) + c.totalA); if (after > num(cc.creditLimit)) h += ' <span class="sep">·</span> <span class="neg"><b>Over credit limit after this invoice (AED ' + fmt(after) + ')</b></span>'; } if (side === 'P' && d.type === 'bill' && d.paidFrom) h += (h ? ' <span class="sep">·</span> ' : '') + esc(accName(d.paidFrom)) + ': ' + accHint(d.paidFrom, d.date, -c.totalA); hb.innerHTML = h; hb.style.display = h ? '' : 'none'; }
+    $$('tr[data-i]', tb).forEach((tr, i) => { const l = d.lines[i]; if (!l) return; const cl = c.lines[i]; const ha = $('[data-h="acc"]', tr); if (ha) ha.innerHTML = l.acc ? accHint(l.acc, d.date) : ''; const hi = $('[data-h="item"]', tr); if (hi) { const it = item(l.itemId); hi.innerHTML = it ? itemHint(it, side, num(l.qty) ? r2(cl.netA / num(l.qty)) : 0, l.qty) : ''; } });
     $$('tr[data-i]', tb).forEach((tr, i) => { const cl = c.lines[i]; if (!cl) return; $('[data-o="net"]', tr).textContent = fmt(cl.net); $('[data-o="vat"]', tr).textContent = fmt(cl.vat); });
     const cur = d.currency || 'AED'; const fx = cur !== 'AED';
     $('#totals').innerHTML = `<table><tr><td>Subtotal (excl. VAT)</td><td class="n">${cur} ${fmt(c.net)}</td></tr>
@@ -1222,6 +1280,7 @@ function docEditor(m, side) {
   $('#back').onclick = () => { if (side === 'P' && d.type === 'bill') VIEW.tab = billKind(d); go(VIEW.page); };
   if ($('#addLine')) $('#addLine').onclick = () => { d.lines.push({ qty: 1, price: 0, disc: 0, vat: defaultVat(side), desc: '' }); drawLines(); };
   bindDocActions(d, side, isNew, coll);
+  attachPanel($('#attHost'), () => d, async (list) => { d.attachments = list; const stored = byId(coll, d.id); if (stored) await store.save(coll, { ...stored, attachments: list }, 'attach'); else saveDraftState(); }, { readOnly: d.status === 'void', hint: side === 'P' ? 'Attach the supplier\u2019s tax invoice, delivery note or receipt – needed to support input VAT. PDF or photo, up to 8 MB.' : 'Attach the customer\u2019s PO, signed delivery note or other support. PDF or photo, up to 8 MB.' });
 }
 function docActions(d, side, isNew) {
   const b = [];
@@ -1290,7 +1349,7 @@ function bindDocActions(d0, side, isNew, coll) {
       const doPost = async () => { if (!d.no) d.no = nextNumber(T[1]); d.status = 'posted'; d.postedAt = new Date().toISOString(); d._total = v.c.total; delete d._dueManual; delete d._paidManual; await store.save(coll, d, 'post'); VIEW.params._draft = null; toast(T[0] + ' ' + d.no + ' posted'); if (act === 'postnew') go(VIEW.page, 'edit', null, { type: d.type, expense: d.isExpense, billKind: d.billKind }); else go(VIEW.page, 'edit', d.id); };
       if (v.warns.length) modal('Check before posting', '<ul class="warns">' + v.warns.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>', [{ label: 'Go back' }, { label: 'Post anyway', cls: 'primary', onClick: doPost }]); else await doPost();
     }
-    if (act === 'delete') confirmBox('Delete this draft? This cannot be undone.', async () => { await store.remove(coll, d.id); toast('Draft deleted'); go(VIEW.page); }, 'Delete', true);
+    if (act === 'delete') confirmBox('Delete this draft? This cannot be undone.', async () => { await attRemoveFiles(d.attachments); await store.remove(coll, d.id); toast('Draft deleted'); go(VIEW.page); }, 'Delete', true);
     if (act === 'void') {
       if (isLocked(d.date)) { toast('Locked period – issue a credit/debit note in an open period instead.', 'err'); return; }
       const paid = S.data.payments.some(p => p.status === 'posted' && (p.allocations || []).some(a => a.docId === d.id)); if (paid) { toast('Payments are allocated to this document. Void or re-allocate them first.', 'err'); return; }
@@ -1463,9 +1522,13 @@ function payEditor(m) {
       ${openDocs.length ? openDocs.map(x => { const a = (p.allocations || []).find(a => a.docId === x.d.id); return `<tr><td>${esc(x.d.no)}</td><td>${fmtD(x.d.date)}</td><td>${fmtD(x.d.dueDate)}</td><td>${x.d.currency || 'AED'}</td><td class="n">${fmt(x.o)}</td><td class="n"><input class="num" data-alloc="${x.d.id}" value="${a ? a.amount : ''}" ${ro ? 'disabled' : ''}>${(x.d.currency || 'AED') !== (p.currency || 'AED') ? `<div class="small muted">= ${esc(p.currency || 'AED')} <input class="num sm" data-allocp="${x.d.id}" value="${a && a.payAmount != null ? a.payAmount : ''}" ${ro ? 'disabled' : ''} title="Amount of this ${isR ? 'receipt' : 'payment'} used"></div>` : ''}</td></tr>`; }).join('') : '<tr><td colspan="6" class="empty">No open documents – the amount will be held on account.</td></tr>'}
       </tbody></table></div>${!ro && openDocs.length ? '<button class="btn sm" id="autoAlloc">Auto-allocate oldest first</button>' : ''}<div id="allocSum" class="muted"></div>` : ''}
     ${p.bouncedDate ? `<div class="alert err">Cheque returned unpaid on ${fmtD(p.bouncedDate)}.</div>` : ''}
+    <div class="hintbar" id="payHint"></div>
+    <div id="attHost"></div>
     <div class="docact">${ro ? (p.status === 'posted' ? `<button class="btn" data-pa="pdf">${FB ? "Print / save PDF" : "Voucher PDF"}</button>${p.method === 'pdc' && !p.clearedDate && !p.bouncedDate ? '<button class="btn" data-pa="clr">Mark cleared</button><button class="btn" data-pa="bnc">Mark returned</button>' : ''}${p.contactId && p.kind !== 'transfer' && !p.bouncedDate ? '<button class="btn primary" data-pa="alloc">Allocate to ' + (isR ? 'invoices' : 'bills') + '</button>' : ''}<button class="btn" data-pa="unpost">Revert to draft</button><button class="btn danger ghost" data-pa="void">Void</button>` : '') : `<button class="btn" data-pa="save" title="Ctrl/⌘ + S">Save draft</button><button class="btn primary" data-pa="post" title="Ctrl/⌘ + Enter">Post</button><button class="btn" data-pa="postnew">Post & new</button>${!isNew ? '<button class="btn danger ghost" data-pa="delete">Delete draft</button>' : ''}`}</div></div>`;
   if (ro) $$('.payform [data-k]').forEach(x => x.disabled = true);
   const read = () => { const o = JSON.parse(JSON.stringify(p)); $$('.payform [data-k]').forEach(el => o[el.dataset.k] = el.value.trim()); o.allocations = $$('[data-alloc]').map(i => { const d = byId(isR ? 'sales' : 'purchases', i.dataset.alloc); const amt = r2(num(i.value)); const pi = $(`[data-allocp="${i.dataset.alloc}"]`); const al = { docId: i.dataset.alloc, amount: amt }; if (pi) al.payAmount = pi.value.trim() !== '' ? r2(num(pi.value)) : docToPay(amt, d.currency, o.currency, o.date, o.rate); return al; }).filter(a => a.amount > 0); o.rate = num(o.rate) || 1; o.amount = r2(num(o.amount)); return o; };
+  const payHints = () => { const o = read(); const hb = $('#payHint'); if (!hb || ro) { if (hb) hb.style.display = 'none'; return; } const amtA = r2(num(o.amount) * (num(o.rate) || 1)); const parts = []; const cc = contact(o.contactId); if (cc) parts.push(contactHint(cc, isR ? 'S' : 'P', o.date)); if (o.bankAcc && o.method !== 'pdc') parts.push(esc(accName(o.bankAcc)) + ': ' + accHint(o.bankAcc, o.date, (isR ? 1 : -1) * amtA - (isT ? 0 : num(o.charges)))); if (isT && o.toAcc) parts.push(esc(accName(o.toAcc)) + ': ' + accHint(o.toAcc, o.date, amtA)); if (!isT && !o.contactId && o.acc && acc(o.acc)) parts.push(esc(accName(o.acc)) + ': ' + accHint(o.acc, o.date)); hb.innerHTML = parts.join(' <span class="sep">·</span> '); hb.style.display = parts.length ? '' : 'none'; };
+  $$('.payform [data-k]').forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', payHints)); setTimeout(payHints);
   const sumA = () => { const o = read(); const s = r2(o.allocations.reduce((a, b) => a + payAmt(b), 0)); const el = $('#allocSum'); if (el) el.innerHTML = `Allocated ${fmt(s)} · On account ${fmt(o.amount - s)}` + (s > o.amount + 0.005 ? ' <b class="neg">– allocations exceed amount</b>' : ''); };
   $$('[data-alloc]').forEach(i => i.oninput = () => { const pi = $(`[data-allocp="${i.dataset.alloc}"]`); if (pi) { const o = read(); const d = byId(isR ? 'sales' : 'purchases', i.dataset.alloc); pi.value = num(i.value) ? docToPay(num(i.value), d.currency, o.currency, o.date, o.rate) : ''; } sumA(); }); $$('[data-allocp]').forEach(i => i.oninput = sumA); sumA();
   $$('.payform [data-k]').forEach(el => el.addEventListener('change', () => { const k = el.dataset.k;
@@ -1473,6 +1536,7 @@ function payEditor(m) {
     if (k === 'acc' && el.value === NEWOPT) { el.value = p.acc || ''; const o0 = read(); accForm(null, (a) => { o0.acc = a.code; VIEW.params._draft = o0; payEditor(m); }, isR ? 'othinc' : 'admin'); return; } if (['kind', 'contactId', 'method', 'currency'].includes(k)) { const o = read(); if (k === 'currency') o.rate = rateFor(o.currency, o.date); if (k === 'contactId') { o.allocations = []; const c = contact(o.contactId); if (c && c.currency) { o.currency = c.currency; o.rate = rateFor(c.currency, o.date); } } VIEW.params._draft = o; payEditor(m); } }));
   if ($('#autoAlloc')) $('#autoAlloc').onclick = () => { let left = num($('#f_amount').value); const ins = $$('[data-alloc]'); if (!left) { left = r2(openDocs.reduce((s, x) => s + docToPay(x.o, x.d.currency, $('#f_currency').value, $('#f_date').value, $('#f_rate').value), 0)); $('#f_amount').value = left; } const pc = $('#f_currency').value, pr = num($('#f_rate').value) || 1, pd = $('#f_date').value; openDocs.sort((a, b) => (a.d.dueDate || a.d.date).localeCompare(b.d.dueDate || b.d.date)).forEach(x => { const inp = ins.find(i => i.dataset.alloc === x.d.id); const pi = $(`[data-allocp="${x.d.id}"]`); const canDoc = payToDoc(left, x.d.currency, pc, pd, pr); const a = r2(Math.min(canDoc, x.o)); inp.value = a > 0.004 ? a : ''; const used = a > 0.004 ? (a === x.o && canDoc >= x.o ? docToPay(a, x.d.currency, pc, pd, pr) : (r2(canDoc) === a ? left : docToPay(a, x.d.currency, pc, pd, pr))) : 0; if (pi) pi.value = used ? r2(used) : ''; left = r2(left - used); }); sumA(); };
   $('#back').onclick = () => go('banking');
+  if (!isT) attachPanel($('#attHost'), () => p, async (list) => { p.attachments = list; const stored = byId('payments', p.id); if (stored) await store.save('payments', { ...stored, attachments: list }, 'attach'); else VIEW.params._draft = p; }, { readOnly: p.status === 'void', hint: isR ? 'Attach the cheque copy, transfer advice or bank slip. PDF or photo, up to 8 MB.' : 'Attach the payment confirmation, cheque copy or supplier receipt. PDF or photo, up to 8 MB.' });
   $$('[data-pa]').forEach(b => b.onclick = async () => {
     const a = b.dataset.pa; const o = read();
     const postNew = a === 'postnew'; const a2 = postNew ? 'post' : a;
@@ -1490,7 +1554,7 @@ function payEditor(m) {
       if (a === 'post') { if (!o.no) o.no = nextNumber(o.kind === 'receipt' ? 'rc' : 'pv'); o.status = 'posted'; } else o.status = 'draft';
       delete o._autoDone; if (o.bankAcc && o.kind !== 'transfer') lsSet('lastBank-' + o.kind, o.bankAcc); await store.save('payments', o, a === 'post' ? 'post' : undefined); VIEW.params._draft = null; toast(a === 'post' ? 'Posted ' + o.no : 'Saved'); if (postNew) go('banking', 'edit', null, { kind: o.kind }); else go('banking', 'edit', o.id);
     }
-    if (a === 'delete') confirmBox('Delete this draft?', async () => { await store.remove('payments', p.id); go('banking'); }, 'Delete', true);
+    if (a === 'delete') confirmBox('Delete this draft?', async () => { await attRemoveFiles(p.attachments); await store.remove('payments', p.id); go('banking'); }, 'Delete', true);
     if (a === 'void') { if (!assertOpen(p.date)) return; confirmBox('Void ' + p.no + '? Allocations are released and the entry leaves the ledger.', async () => { const x = byId('payments', p.id); x.status = 'void'; await store.save('payments', x, 'void'); render(); }, 'Void', true); }
     if (a === 'unpost') { if (!assertOpen(p.date)) return; const x = byId('payments', p.id); x.status = 'draft'; await store.save('payments', x, 'unpost'); render(); }
     if (a === 'alloc') allocateDialog(p.id);
@@ -1719,7 +1783,7 @@ function journalEditor(m) {
     <div class="docact">${ro ? (j.status === 'posted' ? '<button class="btn" data-ja="copy">Copy to next month (recurring)</button><button class="btn" data-ja="reverse">Create reversing journal</button><button class="btn" data-ja="unpost">Revert to draft</button><button class="btn danger ghost" data-ja="void">Void</button>' : '') : `<button class="btn" data-ja="save">Save draft</button><button class="btn primary" data-ja="post">Post</button>${!isNew ? '<button class="btn danger ghost" data-ja="delete">Delete</button>' : ''}`}</div></div>`;
   const tb = $('#jl');
   const draw = () => {
-    tb.innerHTML = j.lines.map((l, i) => `<tr data-i="${i}"><td><select data-l="acc">${accOptions(l.acc)}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select></td><td><input data-l="desc" value="${esc(l.desc || '')}"></td><td><select data-l="contactId">${opt('', '—', l.contactId)}${ro ? '' : opt(NEWOPT, '➕ Add new contact…', '')}${S.data.contacts.map(c => opt(c.id, c.name, l.contactId)).join('')}</select></td>${S.data.costcenters.length ? `<td><select data-l="cc">${ccOptions(l.cc)}</select></td>` : ''}<td><input class="num" data-l="dr" value="${esc(l.dr || '')}"></td><td><input class="num" data-l="cr" value="${esc(l.cr || '')}"></td><td>${ro ? '' : `<button class="iconbtn sm" data-del="${i}">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
+    tb.innerHTML = j.lines.map((l, i) => `<tr data-i="${i}"><td><select data-l="acc">${accOptions(l.acc)}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select><div class="lh" data-h="acc"></div></td><td><input data-l="desc" value="${esc(l.desc || '')}"></td><td><select data-l="contactId">${opt('', '—', l.contactId)}${ro ? '' : opt(NEWOPT, '➕ Add new contact…', '')}${S.data.contacts.map(c => opt(c.id, c.name, l.contactId)).join('')}</select></td>${S.data.costcenters.length ? `<td><select data-l="cc">${ccOptions(l.cc)}</select></td>` : ''}<td><input class="num" data-l="dr" value="${esc(l.dr || '')}"></td><td><input class="num" data-l="cr" value="${esc(l.cr || '')}"></td><td>${ro ? '' : `<button class="iconbtn sm" data-del="${i}">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
     if (ro) $$('input,select', $('.jform')).forEach(x => x.disabled = true);
     $$('[data-l]', tb).forEach(el => el.addEventListener('input', () => { if (el.value === NEWOPT) return; j.lines[Number(el.closest('tr').dataset.i)][el.dataset.l] = el.value; tot(); }));
     $$('[data-l]', tb).forEach(el => el.addEventListener('change', () => { const i = Number(el.closest('tr').dataset.i); const k = el.dataset.l;
@@ -1729,7 +1793,8 @@ function journalEditor(m) {
     $$('[data-del]', tb).forEach(b => b.onclick = () => { j.lines.splice(Number(b.dataset.del), 1); draw(); });
     tot();
   };
-  const tot = () => { const dr = r2(j.lines.reduce((s, l) => s + num(l.dr), 0)), cr = r2(j.lines.reduce((s, l) => s + num(l.cr), 0)); $('#tdr').textContent = fmt(dr); $('#tcr').textContent = fmt(cr); $('#jmsg').innerHTML = Math.abs(dr - cr) > 0.004 ? `<div class="alert warn">Out of balance by ${fmt(dr - cr)}</div>` : ''; };
+  const tot = () => { $$('#jl tr[data-i]').forEach((tr, i) => { const l = j.lines[i]; const h = $('[data-h="acc"]', tr); if (h && l) h.innerHTML = l.acc ? accHint(l.acc, $('#f_date') ? $('#f_date').value : j.date, ro ? 0 : r2(num(l.dr) - num(l.cr))) : ''; });
+    const dr = r2(j.lines.reduce((s, l) => s + num(l.dr), 0)), cr = r2(j.lines.reduce((s, l) => s + num(l.cr), 0)); $('#tdr').textContent = fmt(dr); $('#tcr').textContent = fmt(cr); $('#jmsg').innerHTML = Math.abs(dr - cr) > 0.004 ? `<div class="alert warn">Out of balance by ${fmt(dr - cr)}</div>` : ''; };
   draw();
   $('#back').onclick = () => go('journals'); if ($('#al')) $('#al').onclick = () => { j.lines.push({ acc: '', dr: '', cr: '' }); draw(); };
   $$('[data-ja]').forEach(b => b.onclick = async () => {
@@ -2020,6 +2085,7 @@ function complianceChecks() {
   const late = S.data.sales.filter(d => isLive(d) && d.type === 'invoice' && d.supplyDate && daysBetween(d.supplyDate, d.date) > 14); add(!late.length, 'Tax invoices issued within 14 days of supply', late.map(d => d.no).join(', ') || 'All good');
   const cnNoRef = S.data.sales.filter(d => isLive(d) && d.type === 'credit' && !d.againstId); add(!cnNoRef.length, 'Tax credit notes reference the original invoice', cnNoRef.map(d => d.no).join(', ') || 'All good');
   const inputNoTrn = S.data.purchases.filter(d => isLive(d) && d.type === 'bill' && d.lines.some(l => l.vat === 'SR') && !(contact(d.contactId) || {}).trn); add(!inputNoTrn.length, 'Input VAT claimed only on tax invoices with supplier TRN', inputNoTrn.map(d => d.no).join(', ') || 'All good');
+  const noDoc = S.data.purchases.filter(d => isLive(d) && d.type === 'bill' && d.lines.some(l => ['SR', 'RC', 'IM'].includes(l.vat)) && !(d.attachments || []).length); add(!noDoc.length, 'Supplier tax invoices attached to bills claiming input VAT', noDoc.length ? noDoc.length + ' bill(s) without an attachment: ' + noDoc.slice(0, 12).map(d => d.no).join(', ') + (noDoc.length > 12 ? '…' : '') : 'All good');
   const drafts = [...S.data.sales, ...S.data.purchases].filter(d => d.status === 'draft' && d.date < today() && d.type !== 'quote' && d.type !== 'po'); add(!drafts.length, 'No old unposted drafts', drafts.length + ' draft documents dated in the past', 'warn');
   const gaps = []; const nums = S.data.sales.filter(d => d.type === 'invoice' && d.no && d.no.startsWith(s.invPrefix || 'INV-')).map(d => parseInt(d.no.slice((s.invPrefix || 'INV-').length), 10)).filter(n => !isNaN(n)).sort((a, b) => a - b); for (let i = 1; i < nums.length; i++) if (nums[i] - nums[i - 1] > 1) gaps.push(nums[i - 1] + 1); add(!gaps.length, 'Tax invoice numbering is sequential without gaps', gaps.length ? 'Missing numbers after: ' + gaps.slice(0, 10).join(', ') : 'All good');
   const overdueRet = vatPeriodsList().filter(p => vatDue(p.to) < today() && !S.data.vatreturns.find(v => v.from === p.from && v.status === 'filed')); add(!overdueRet.length, 'All VAT returns filed on time', overdueRet.map(p => fmtD(p.from) + '–' + fmtD(p.to)).join('; ') || 'All good', 'err');
@@ -2724,6 +2790,83 @@ const FIRESTORE_RULES_SNIPPET = `    // ---- CityCube Books (accounting): admins
     match /{col}/{docId} {
       allow read, write: if col.matches('bk_.*') && isBooksAdmin();
     }`;
+
+/* ===================== Attachments: supplier invoices, receipts, bank slips (PDF / photos) =====================
+   Files are stored in the same database as the books, split into chunks (Firestore documents are limited to 1 MB),
+   so no extra Firebase Storage set-up or paid plan is needed. Photos are compressed before upload. */
+const ATT_CHUNK = FB ? 700000 : 180000;            // base64 characters per chunk document
+const ATT_MAX = 8 * 1024 * 1024;                   // 8 MB per file after compression
+const attLocal = (k) => 'cc-att-' + k;
+async function attWriteChunk(key, body) {
+  if (DB) return store.write('attachments/' + key, body);
+  try { localStorage.setItem(attLocal(key), JSON.stringify(body)); } catch (e) { throw new Error('This browser has no room left for attachments. Use the cloud version.'); }
+}
+async function attReadChunk(key) {
+  if (DB) { const s = await DB.doc(NS + 'attachments/' + key).get(); return s.exists ? s.data() : null; }
+  try { return JSON.parse(localStorage.getItem(attLocal(key)) || 'null'); } catch (e) { return null; }
+}
+async function attDeleteChunk(key) {
+  if (DB) { try { await DB.doc(NS + 'attachments/' + key).delete(); } catch (e) { } return; }
+  try { localStorage.removeItem(attLocal(key)); } catch (e) { }
+}
+function fileToDataURL(file) { return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(new Error('Could not read ' + file.name)); fr.readAsDataURL(file); }); }
+async function compressImage(file, max = 1800, q = 0.78) {
+  const url = await fileToDataURL(file);
+  return new Promise((res) => { const im = new Image(); im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', q)); }; im.onerror = () => res(url); im.src = url; });
+}
+async function attUpload(file) {
+  const isImg = /^image\/(jpeg|png|webp|heic|heif|gif|bmp)/i.test(file.type) || /\.(jpe?g|png|webp|heic)$/i.test(file.name);
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  const okOther = /\.(xlsx?|docx?|csv|txt|eml|msg)$/i.test(file.name);
+  if (!isImg && !isPdf && !okOther) throw new Error(file.name + ': only PDF, photos, Excel, Word or CSV files can be attached.');
+  const dataUrl = isImg && !/gif$/i.test(file.type) ? await compressImage(file) : await fileToDataURL(file);
+  const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1); const type = dataUrl.slice(5, dataUrl.indexOf(';')) || file.type || 'application/octet-stream';
+  const bytes = Math.round(b64.length * 3 / 4); if (bytes > ATT_MAX) throw new Error(file.name + ' is ' + (bytes / 1048576).toFixed(1) + ' MB – the limit is 8 MB. Scan at a lower resolution or split the PDF.');
+  const id = 'att' + uid(); const n = Math.ceil(b64.length / ATT_CHUNK) || 1;
+  for (let i = 0; i < n; i++) await attWriteChunk(id + '_' + i, { attId: id, n: i, of: n, data: b64.slice(i * ATT_CHUNK, (i + 1) * ATT_CHUNK) });
+  let name = file.name; if (isImg && type === 'image/jpeg' && !/\.jpe?g$/i.test(name)) name = name.replace(/\.[^.]+$/, '') + '.jpg';
+  return { id, name, type, size: bytes, chunks: n, at: new Date().toISOString(), by: S.user.name || '' };
+}
+async function attBlob(meta) {
+  let b64 = ''; for (let i = 0; i < meta.chunks; i++) { const c = await attReadChunk(meta.id + '_' + i); if (!c) throw new Error('Part of this attachment is missing.'); b64 += c.data; }
+  const bin = atob(b64); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: meta.type });
+}
+async function attRemoveFiles(list) { for (const m of (list || [])) for (let i = 0; i < m.chunks; i++) await attDeleteChunk(m.id + '_' + i); }
+const fmtSize = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+async function attView(meta) {
+  const t = toast('Opening ' + meta.name + '…'); let blob; try { blob = await attBlob(meta); } catch (e) { toast(e.message, 'err'); return; }
+  const url = URL.createObjectURL(blob); const isImg = meta.type.startsWith('image/'); const isPdf = meta.type === 'application/pdf';
+  if (!isImg && !(isPdf && FB)) { downloadFile(meta.name, blob); return; }
+  const w = modal(meta.name, isImg ? `<div style="text-align:center"><img src="${url}" alt="" style="max-width:100%;max-height:70vh;border:1px solid var(--line);border-radius:6px"></div>` : `<iframe src="${url}" title="${esc(meta.name)}" style="width:100%;height:72vh;border:1px solid var(--line);border-radius:6px"></iframe>`,
+    [{ label: 'Download', onClick: () => { downloadFile(meta.name, blob); return false; } }, { label: 'Close', cls: 'primary' }], { xwide: true });
+  const obs = new MutationObserver(() => { if (!document.body.contains(w.el)) { URL.revokeObjectURL(url); obs.disconnect(); } }); obs.observe(document.body, { childList: true, subtree: true });
+}
+/* Attachment panel used on bills, invoices, credit notes, receipts and payments.
+   getDoc(): current document object; persist(list): saves the new attachment list (or keeps it on an unsaved draft). */
+function attachPanel(host, getDoc, persist, opts = {}) {
+  const draw = () => {
+    const d = getDoc(); const list = d.attachments || [];
+    host.innerHTML = `<div class="attpanel"><div class="atthead"><h3>Attachments ${list.length ? '<span class="badge grey">' + list.length + '</span>' : ''}</h3><span class="muted small">${esc(opts.hint || 'Supplier tax invoice, delivery note, receipt or bank slip – PDF or photo, up to 8 MB.')}</span></div>
+    <div class="attlist">${list.map((a, i) => `<div class="att"><button class="attname" data-av="${i}" title="Open">${a.type.startsWith('image/') ? '🖼️' : a.type === 'application/pdf' ? '📄' : '📎'} ${esc(a.name)}</button><span class="muted small">${fmtSize(a.size)} · ${a.at ? fmtD(a.at.slice(0, 10)) : ''}${a.by ? ' · ' + esc(a.by) : ''}</span>${opts.readOnly ? '' : `<button class="iconbtn sm" data-ad="${i}" title="Remove">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</div>`).join('')}</div>
+    ${opts.readOnly ? '' : `<label class="attdrop" tabindex="0"><input type="file" multiple accept="application/pdf,image/*,.xlsx,.xls,.docx,.doc,.csv,.eml,.msg" hidden><span>📎 <b>Attach files</b> – click, drag & drop, or paste a screenshot (Ctrl + V)</span></label>`}</div>`;
+    $$('[data-av]', host).forEach(b => b.onclick = () => attView(list[Number(b.dataset.av)]));
+    $$('[data-ad]', host).forEach(b => b.onclick = () => { const a = list[Number(b.dataset.ad)]; confirmBox('Remove ' + esc(a.name) + '?', async () => { const nl = list.filter((_, j) => j !== Number(b.dataset.ad)); await persist(nl); await attRemoveFiles([a]); draw(); toast('Attachment removed'); }, 'Remove', true); });
+    const drop = $('.attdrop', host); if (!drop) return;
+    const inp = $('input', drop); inp.onchange = () => add(Array.from(inp.files));
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); add(Array.from(e.dataTransfer.files)); });
+  };
+  const add = async (files) => {
+    if (!files.length) return; const drop = $('.attdrop span', host); const list = (getDoc().attachments || []).slice();
+    for (const f of files) { if (drop) drop.textContent = 'Uploading ' + f.name + '…'; try { list.push(await attUpload(f)); } catch (e) { toast(e.message, 'err'); } }
+    await persist(list); draw(); toast(files.length === 1 ? 'File attached' : files.length + ' files attached');
+  };
+  host._attPaste = (e) => { if (!document.body.contains(host) || document.querySelector('.mwrap')) return; const files = Array.from((e.clipboardData || {}).files || []); if (files.length && !opts.readOnly) { e.preventDefault(); add(files.map((f, i) => f.name === 'image.png' ? new File([f], 'screenshot-' + today() + (i ? '-' + i : '') + '.png', { type: f.type }) : f)); } };
+  document.removeEventListener('paste', window._ccPaste || (() => { })); window._ccPaste = host._attPaste; document.addEventListener('paste', host._attPaste);
+  draw();
+}
 
 /* ===================== Demo data & boot ===================== */
 async function seedDemo() {
