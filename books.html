@@ -1067,6 +1067,7 @@ function docListPage(m, side) {
     ${dataTable([{ k: 'no', l: 'Number' }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
   $$('[data-tab]', m).forEach(b => b.onclick = () => { VIEW.tab = b.dataset.tab; VIEW.params = {}; render(); });
   if ($('#newDoc')) $('#newDoc').onclick = () => go(VIEW.page, 'edit', null, { type: tab });
+  if ($('#qdSyncNow')) $('#qdSyncNow').onclick = () => { if (!QD.customers || !QD.quotes) { toast('Still connecting to Quote Desk…', 'warn'); return; } qdReconcile(true); };
   $$('[data-qdopen]', m).forEach(a => a.onclick = (e) => { e.preventDefault(); go('sales', 'edit', a.dataset.qdopen); });
   if ($('#qdImp')) $('#qdImp').onclick = quoteDeskImportDialog;
   if ($('#newExp')) $('#newExp').onclick = () => go('purchases', 'edit', null, { type: 'bill', expense: true });
@@ -2597,40 +2598,65 @@ async function qdBuildDoc(q, contactRec) {
   const t = q.terms || {};
   return { id: 'qd_' + q.id, type: 'invoice', no: qdKeyNo(q), date: q.date, supplyDate: q.supplyDate || '', dueDate: addDays(q.date, num(q.dueDays)), contactId: contactRec.id, currency: cur, rate, emirate: contactRec.emirate || S.settings.emirate || 'DXB', reference: [q.ref, q.quoteNo ? 'Quote ' + q.quoteNo : '', com ? 'Commercial invoice' : ''].filter(Boolean).join(' · '), lines, notes: q.subject || '', terms: t.payment ? 'Payment: ' + t.payment : '', status: 'posted', fromQuoteDesk: 'QD:' + q.id, source: 'Quote Desk', qdTotal: c.total, qdSig: qdSig(q), qdStatus: q.status, qdPaidAt: q.paidAt || '' };
 }
-function qdSig(q) { return JSON.stringify([q.no, q.rev, q.date, q.supplyDate, q.dueDays, q.cust && q.cust.id, q.cust && q.cust.name, q.cur && q.cur.code, q.rate, q.docType, q.discType, q.disc, q.vat, q.freight, q.insurance, (q.lines || []).map(l => [l.pid, l.code, l.desc, l.qty, l.price, l.disc])]); }
-async function qdReconcile() {
-  if (QD.busy) { QD.again = true; return; } QD.busy = true; const issues = []; let n = 0;
+const QD_SIGV = 2;
+function qdSig(q) { return JSON.stringify([q.no, q.date, q.supplyDate, q.dueDays, q.cust, q.cur && q.cur.code, q.rate, q.docType, q.discType, q.disc, q.vat, q.freight, q.insurance, q.ref, q.subject, q.terms, q.quoteNo, (q.lines || []).map(l => [l.pid, l.code, l.desc, l.details, l.uom, l.qty, l.price, l.disc])]); }
+const allocatedTo = (docId) => r2(S.data.payments.filter(p => p.status === 'posted').reduce((s, p) => s + (p.allocations || []).filter(a => a.docId === docId).reduce((t, a) => t + num(a.amount), 0), 0));
+async function qdReconcile(force) {
+  if (QD.busy) { QD.again = true; return; } QD.busy = true; const issues = []; let n = 0, changed = 0;
   try {
     for (const c of Object.values(QD.customers)) { if (c.name) await qdEnsureContact({ id: c.id, name: c.name }); }
-    const invs = Object.values(QD.quotes).filter(q => q.no && q.date && ['Tax Invoice', 'Commercial Invoice'].includes(q.docType || 'Tax Invoice')).sort((a, b) => (a.date + a.no).localeCompare(b.date + b.no));
-    for (const q of invs) {
-      const id = 'qd_' + q.id; const ex = byId('sales', id); const label = qdKeyNo(q);
-      const paidAlloc = ex && S.data.payments.some(p => p.status === 'posted' && (p.allocations || []).some(a => a.docId === id));
+    const all = Object.values(QD.quotes).filter(q => q.no && q.date && ['Tax Invoice', 'Commercial Invoice'].includes(q.docType || 'Tax Invoice'));
+    const groups = {}; all.forEach(q => (groups[q.no] = groups[q.no] || []).push(q));
+    for (const no of Object.keys(groups).sort()) {
+      const g = groups[no].sort((a, b) => num(a.rev) - num(b.rev));
+      const live = g.filter(q => q.status !== 'Revised'); const q = live[live.length - 1] || g[g.length - 1];
+      // the one Books document for this invoice number (older syncs may have made one per revision)
+      const ids = g.map(x => 'qd_' + x.id); const exs = S.data.sales.filter(d => ids.includes(d.id) && d.type === 'invoice');
+      let ex = exs.find(d => d.id === 'qd_' + q.id && d.status === 'posted') || exs.find(d => d.status === 'posted') || exs[0] || null;
+      for (const dup of exs.filter(d => ex && d.id !== ex.id && d.status === 'posted')) {
+        for (const p of S.data.payments.filter(p => (p.allocations || []).some(a => a.docId === dup.id))) { await store.save('payments', { ...p, allocations: p.allocations.map(a => a.docId === dup.id ? { ...a, docId: ex.id } : a) }, 'sync-realloc'); }
+        if (isLocked(dup.date)) issues.push(['err', dup.no + ' is a duplicate of an older revision in a locked period – reverse it with a credit note.', dup.id]);
+        else await store.save('sales', { ...dup, status: 'void', voidReason: 'Superseded by the latest revision of ' + no, voidedAt: new Date().toISOString() }, 'sync-void'); changed++;
+      }
+      const label = no + (num(q.rev) ? ' (Rev ' + q.rev + ')' : '');
       if (q.status === 'Cancelled') {
-        if (ex && ex.status === 'posted') { if (isLocked(ex.date)) issues.push(['err', label + ' was cancelled in Quote Desk but is in a locked period – issue a credit note in Books.']); else if (paidAlloc) issues.push(['err', label + ' was cancelled in Quote Desk but has receipts allocated – remove them, then it will be voided.']); else { await store.save('sales', { ...ex, status: 'void', voidReason: 'Cancelled in Quote Desk', voidedAt: new Date().toISOString() }, 'sync-void'); } }
+        if (ex && ex.status === 'posted') { if (isLocked(ex.date)) issues.push(['err', label + ' was cancelled in Quote Desk but is in a locked period – issue a credit note in Books.', ex.id]); else if (allocatedTo(ex.id) > 0) issues.push(['err', label + ' was cancelled in Quote Desk but has receipts allocated – re-allocate them, then it will be voided.', ex.id]); else { await store.save('sales', { ...ex, status: 'void', voidReason: 'Cancelled in Quote Desk', voidedAt: new Date().toISOString() }, 'sync-void'); changed++; } }
         continue;
       }
-      if (ex && ex.qdSig === qdSig(q) && ex.status === 'posted') { n++; if (q.status === 'Paid' && openAmount(ex) > 0.005) issues.push(['warn', label + ' is marked Paid in Quote Desk' + (q.paidAt ? ' (' + fmtD(q.paidAt.slice(0, 10)) + ')' : '') + ' – record the receipt in Books.', id]); continue; }
-      if (isLocked(q.date) && (!ex || ex.qdSig !== qdSig(q))) { issues.push(['err', label + (ex ? ' was changed' : ' was issued') + ' in Quote Desk with a date in a locked period (' + fmtD(q.date) + '). Not posted – correct it in Quote Desk or adjust in Books.']); if (ex) n++; continue; }
-      if (ex && paidAlloc) { const nd = await qdBuildDoc(q, contact(ex.contactId) || await qdEnsureContact(q.cust)); if (Math.abs(calcDoc(nd, 'S').total - calcDoc(ex, 'S').total) > 0.005) { issues.push(['err', label + ' was edited in Quote Desk after a receipt was recorded in Books. Review it.']); n++; continue; } }
-      const ct = await qdEnsureContact(q.cust || {}); if (!ct) { issues.push(['err', label + ' has no customer name.']); continue; }
-      const doc = await qdBuildDoc(q, ct); if (ex) { doc.emirate = ex.emirate || doc.emirate; doc.createdAt = ex.createdAt; }
-      doc._total = calcDoc(doc, 'S').total;
-      await store.save('sales', doc, ex ? 'sync-update' : 'sync'); n++;
+      const sig = qdSig(q);
+      if (!force && ex && ex.status === 'posted' && ex.qdSig === sig && ex.qdSigV === QD_SIGV && ex.qdId === q.id) { n++; if (q.status === 'Paid' && openAmount(ex) > 0.005) issues.push(['warn', label + ' is marked Paid in Quote Desk' + (q.paidAt ? ' (' + fmtD(q.paidAt.slice(0, 10)) + ')' : '') + ' – record the receipt in Books.', ex.id]); continue; }
+      const ct = (ex && contact(ex.contactId) && (!q.cust || !q.cust.id || contact(ex.contactId).qdId === q.cust.id)) ? contact(ex.contactId) : await qdEnsureContact(q.cust || {});
+      if (!ct) { issues.push(['err', label + ' has no customer name.']); continue; }
+      const doc = await qdBuildDoc(q, ct); doc.no = no; doc.qdId = q.id; doc.qdRev = num(q.rev); doc.qdSigV = QD_SIGV;
+      if (num(q.rev)) doc.reference = [doc.reference, 'Revision ' + q.rev].filter(Boolean).join(' · ');
+      if (ex) { doc.id = ex.id; doc.emirate = ex.emirate || doc.emirate; doc.createdAt = ex.createdAt; }
+      const newTotal = calcDoc(doc, 'S').total;
+      if (ex && ex.status === 'posted') {
+        const same = Math.abs(newTotal - calcDoc(ex, 'S').total) < 0.005 && ex.date === doc.date && ex.contactId === doc.contactId && JSON.stringify(calcDoc(ex, 'S').lines.map(l => [l.netA, l.vatA])) === JSON.stringify(calcDoc(doc, 'S').lines.map(l => [l.netA, l.vatA]));
+        if (isLocked(ex.date) || isLocked(doc.date)) {
+          if (same) { await store.save('sales', { ...ex, qdSig: sig, qdSigV: QD_SIGV, qdId: q.id, qdStatus: q.status, qdTotal: doc.qdTotal }, 'sync'); n++; }
+          else issues.push(['err', label + ' was changed in Quote Desk but falls in a locked period (' + fmtD(ex.date) + '). Books keeps the original – issue a credit note or unlock the period.', ex.id]);
+          continue;
+        }
+        const alloc = allocatedTo(ex.id);
+        if (alloc > newTotal + 0.005 * (num(doc.rate) || 1)) { issues.push(['err', label + ' was reduced in Quote Desk to ' + fmt(newTotal) + ' but ' + fmt(alloc) + ' is already allocated from receipts. Reduce the allocation (Banking › receipt › Allocate), then it will update.', ex.id]); n++; continue; }
+      } else if (isLocked(doc.date)) { issues.push(['err', label + ' is dated in a locked period (' + fmtD(doc.date) + '). Not posted – change the date in Quote Desk or unlock the period.']); continue; }
+      doc._total = newTotal; await store.save('sales', doc, ex ? 'sync-update' : 'sync'); n++; changed++;
     }
-    Object.values(QD.quotes).forEach(q => { const ex = byId('sales', 'qd_' + q.id); if (ex && ex.status === 'posted' && Math.abs(calcDoc(ex, 'S').total - num(ex.qdTotal)) > 0.05) issues.push(['warn', ex.no + ': Books total ' + fmt(calcDoc(ex, 'S').total) + ' vs Quote Desk ' + fmt(ex.qdTotal) + ' (discount rounding).', ex.id]); });
-    QD.issues = issues; QD.synced = n; QD.lastSync = new Date();
+    S.data.sales.filter(d => d.source === 'Quote Desk' && d.status === 'posted' && Math.abs(calcDoc(d, 'S').total - num(d.qdTotal)) > 0.05).forEach(d => issues.push(['warn', d.no + ': Books total ' + fmt(calcDoc(d, 'S').total) + ' vs Quote Desk ' + fmt(d.qdTotal) + ' (discount rounding).', d.id]));
+    QD.issues = issues; QD.synced = n; QD.lastSync = new Date(); QD.changed = changed;
   } catch (e) { console.error(e); QD.issues = [['err', 'Sync stopped: ' + (e.message || e.code)]]; }
   QD.busy = false;
-  if (['sales', 'dashboard'].includes(VIEW.page) && !VIEW.sub) render();
+  if (force) { const errs = QD.issues.filter(i => i[0] === 'err').length; toast((changed ? changed + ' invoice(s) updated from Quote Desk' : 'No new changes from Quote Desk') + (errs ? ' · ' + errs + ' need your attention (see the yellow box)' : ''), errs ? 'warn' : 'ok'); }
+  if (['sales', 'dashboard'].includes(VIEW.page) && (!VIEW.sub || VIEW.page === 'sales')) render();
   if (QD.again) { QD.again = false; qdSchedule(); }
 }
 function qdPanel() {
   if (!FB) return '';
   const st = !QD.lastSync ? '<span class="dot a"></span>Connecting to Quote Desk…' : `<span class="dot g"></span>Live link to Quote Desk · ${QD.synced} tax invoice(s) in the ledger · checked ${QD.lastSync.toLocaleTimeString()}`;
-  return `<div class="card qdpanel"><div class="toolbar" style="margin:0"><div>${st}</div><span class="grow"></span><a class="btn primary" href="${QUOTE_DESK_URL}">Issue invoices in Quote Desk ↗</a></div>
+  return `<div class="card qdpanel"><div class="toolbar" style="margin:0"><div>${st}</div><span class="grow"></span><button class="btn" id="qdSyncNow">Sync now</button><a class="btn primary" href="${QUOTE_DESK_URL}">Issue invoices in Quote Desk ↗</a></div>
   ${QD.issues.length ? `<div class="alert warn" style="margin-bottom:0">${QD.issues.map(i => `<div>${i[0] === 'err' ? '⚠️' : '•'} ${esc(i[1])}${i[2] ? ` <a href="#sales" data-qdopen="${esc(i[2])}">Open</a>` : ''}</div>`).join('')}</div>` : ''}
-  <p class="small muted" style="margin:6px 0 0">Tax invoices are issued and numbered in Quote Desk and post here automatically (customers and products too). Record receipts, credit notes and everything else in Books. To cancel an invoice, cancel it in Quote Desk.</p></div>`;
+  <p class="small muted" style="margin:6px 0 0">Tax invoices are issued and numbered in Quote Desk and post here automatically – new invoices, edits and revisions update within seconds while Books is open (and catch up when it is next opened). Record receipts, credit notes and everything else in Books. To cancel an invoice, cancel it in Quote Desk.</p></div>`;
 }
 
 /* Firestore rules to add (shown in Company & Settings › Data) */
