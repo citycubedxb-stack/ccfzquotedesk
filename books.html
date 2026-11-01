@@ -1079,7 +1079,7 @@ function docListPage(m, side) {
   const out = rows.filter(r => r.open > 0).reduce((s, r) => s + r.open * (num(r.d.rate) || 1), 0);
   const overdue = rows.filter(r => r.st[0] === 'Overdue').reduce((s, r) => s + r.open * (num(r.d.rate) || 1), 0);
   m.innerHTML = pageHead(side === 'S' ? 'Sales' : 'Purchases & Expenses', side === 'S' ? (FB ? 'Tax invoices from Quote Desk, receipts and tax credit notes' : 'Quotations, FTA-compliant tax invoices and tax credit notes') : 'Purchase orders, supplier bills, expenses, imports and reverse charge',
-    `${side === 'S' && !FB ? '<button class="btn" id="qdImp">Import from Quote Desk</button>' : ''}${side === 'P' ? '<button class="btn primary" data-newbill="purchase">+ Purchase (goods)</button><button class="btn" data-newbill="expense">+ Expense bill</button><button class="btn" id="newExp">+ Paid expense</button>' + (['debit', 'po'].includes(tab) ? '<button class="btn" id="newDoc">+ New ' + esc(T[tab][0].toLowerCase()) + '</button>' : '') : (FB && tab === 'invoice' ? '' : '<button class="btn primary" id="newDoc">+ New ' + esc(T[tab][0].toLowerCase()) + '</button>')}`) +
+    `${side === 'S' && !FB ? '<button class="btn" id="qdImp">Import from Quote Desk</button>' : ''}${side === 'P' ? '<button class="btn primary" data-newbill="purchase">+ Purchase (goods)</button><button class="btn" data-newbill="expense">+ Expense</button>' + (['debit', 'po'].includes(tab) ? '<button class="btn" id="newDoc">+ New ' + esc(T[tab][0].toLowerCase()) + '</button>' : '') : (FB && tab === 'invoice' ? '' : '<button class="btn primary" id="newDoc">+ New ' + esc(T[tab][0].toLowerCase()) + '</button>')}`) +
     (side === 'S' ? qdPanel() : '') + tabs(side === 'P' ? P_TABS : Object.entries(T).filter(([k]) => tabKeys.includes(k)).map(([k, v]) => [k, v[0] + 's']), tab) +
     `<div class="kpis sm"><div class="kpi"><span>Documents</span><b>${rows.length}</b></div><div class="kpi"><span>Outstanding (AED)</span><b>${fmt(out)}</b></div><div class="kpi"><span>Overdue (AED)</span><b class="${overdue > 0 ? 'neg' : ''}">${fmt(overdue)}</b></div><div class="kpi"><span>Total value (AED)</span><b>${fmt(rows.filter(r => r.d.status === 'posted').reduce((s, r) => s + r.totalA, 0))}</b></div></div>
     <div class="card"><div class="toolbar"><input id="dq" placeholder="Filter by number, party, reference" value="${esc(VIEW.params.q || '')}"><select id="df">${['all', 'draft', 'unpaid', 'partpaid', 'overdue', 'paid', 'posted', 'void', 'open'].map(x => opt(x, x === 'all' ? 'All statuses' : x === 'partpaid' ? 'Part paid' : x[0].toUpperCase() + x.slice(1), f)).join('')}</select><span class="grow"></span>${exportBar('#docTbl', (side === 'S' ? 'Sales_' : 'Purchases_') + tab)}</div>
@@ -1102,7 +1102,7 @@ PAGES.purchases = (m) => docListPage(m, 'P');
 function blankDoc(side, type, extra) {
   const s = S.settings; const d = { id: uid(), type, no: '', date: today(), status: 'draft', contactId: '', currency: 'AED', rate: 1, lines: [{ qty: 1, price: 0, disc: 0, vat: 'SR', desc: '' }], notes: '' };
   if (side === 'S') { d.supplyDate = ''; d.dueDate = addDays(today(), 30); d.emirate = s.emirate || 'DXB'; d.terms = type === 'quote' ? 'Quotation valid for 30 days.' : s.invTerms; if (type === 'credit') d.returnStock = true; if (type === 'quote') d.dueDate = addDays(today(), 30); }
-  else { d.dueDate = addDays(today(), 30); d.supplierInvNo = ''; if (type === 'bill' || type === 'debit' || type === 'po') d.billKind = (extra && extra.billKind) || (extra && extra.expense ? 'expense' : 'purchase'); if (extra && extra.expense) { d.paidFrom = lsGet('lastPaidFrom', (bankAccs()[0] || {}).code || '1100'); d.paidDate = today(); d.isExpense = true; } }
+  else { d.dueDate = addDays(today(), 30); d.supplierInvNo = ''; if (type === 'bill' || type === 'debit' || type === 'po') d.billKind = (extra && extra.billKind) || (extra && extra.expense ? 'expense' : 'purchase'); if (type === 'bill') { const pf = lsGet('lastPay-' + d.billKind, ''); if (pf && acc(pf)) { d.paidFrom = pf; d.paidDate = today(); } } if (extra && extra.expense) { d.paidFrom = lsGet('lastPaidFrom', (bankAccs()[0] || {}).code || '1100'); d.paidDate = today(); d.isExpense = true; } }
   return d;
 }
 function docEditor(m, side) {
@@ -1137,7 +1137,7 @@ function docEditor(m, side) {
       ${(d.type === 'credit' || d.type === 'debit') ? field(['reason', 'Reason for adjustment', 'text', { help: 'Shown on the tax credit note' }], d.reason) : ''}
       ${d.type === 'credit' ? field(['returnStock', 'Goods returned to stock', 'check'], d.returnStock !== false) : ''}
       ${S.data.costcenters.length ? field(['cc', 'Cost centre / project', 'select', { options: ccOptions }], d.cc) : ''}
-      ${side === 'P' && d.type === 'bill' ? field(['paidFrom', 'Paid immediately from (expense)', 'select', { options: (v) => opt('', '— on credit (unpaid) —', v) + bankOptions(v) }], d.paidFrom) : ''}
+      ${side === 'P' && d.type === 'bill' ? field(['paidFrom', 'Payment', 'select', { options: (v) => opt('', 'Not paid yet – on credit', v) + bankAccs().map(a => opt(a.code, 'Paid now from ' + a.name, v)).join(''), help: d.paidFrom ? 'Saved as paid – no separate payment voucher needed' : 'Record the payment later with the Pay button' }], d.paidFrom) : ''}
       ${side === 'P' && d.type === 'bill' && d.paidFrom ? field(['paidDate', 'Payment date', 'date'], d.paidDate || d.date) : ''}
     </div>
     ${ct && side === 'S' && ct.vatRegistered && !ct.trn ? '<div class="alert warn">This customer is marked VAT-registered but has no TRN. The recipient TRN must appear on a full tax invoice.</div>' : ''}
@@ -1283,7 +1283,7 @@ function bindDocActions(d0, side, isNew, coll) {
   const getD = () => { const d = JSON.parse(JSON.stringify(d0)); $$('.docform > .grid4 [data-k], .docbottom [data-k]').forEach(el => { d[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value.trim(); }); $$('#lines tbody tr[data-i]').forEach((tr, i) => { $$('[data-l]', tr).forEach(el => d.lines[i][el.dataset.l] = el.value); }); d.rate = num(d.rate) || 1; return d; };
   $$('[data-act]').forEach(b => b.onclick = async () => {
     const act = b.dataset.act; const d = getD(); const T = DOCTYPES[side][d.type];
-    if ((act === 'post' || act === 'postnew' || act === 'save') && d.paidFrom) lsSet('lastPaidFrom', d.paidFrom);
+    if ((act === 'post' || act === 'postnew' || act === 'save') && d.type === 'bill') lsSet('lastPay-' + billKind(d), d.paidFrom || '');
     if (act === 'save') { const v = validateDoc(d, side, false); if (!d.contactId) { toast(v.errs[0], 'err'); return; } d.status = 'draft'; d._total = v.c.total; await store.save(coll, d); VIEW.params._draft = null; toast('Draft saved'); go(VIEW.page, 'edit', d.id); }
     if (act === 'post' || act === 'postnew') {
       const v = validateDoc(d, side, true); if (v.errs.length) { modal('Cannot post', '<ul class="errs">' + v.errs.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>', [{ label: 'OK', cls: 'primary' }]); return; }
