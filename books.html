@@ -298,6 +298,7 @@ const store = {
     if (i >= 0) arr[i] = rec; else arr.push(rec);
     bump(); store.persistLocal();
     audit(action || (before ? 'update' : 'create'), coll, rec, before);
+    if (FB && (coll === 'payments' || coll === 'sales') && typeof qdWriteBackSoon === 'function') qdWriteBackSoon();
     await store.write(coll + '/' + rec.id, JSON.parse(JSON.stringify(rec)));
     return rec;
   },
@@ -2779,10 +2780,30 @@ async function qdReconcile(force) {
     S.data.sales.filter(d => d.source === 'Quote Desk' && d.status === 'posted' && Math.abs(calcDoc(d, 'S').total - num(d.qdTotal)) > 0.05).forEach(d => issues.push(['warn', d.no + ': Books total ' + fmt(calcDoc(d, 'S').total) + ' vs Quote Desk ' + fmt(d.qdTotal) + ' (discount rounding).', d.id]));
     QD.issues = issues; QD.synced = n; QD.lastSync = new Date(); QD.changed = changed;
   } catch (e) { console.error(e); QD.issues = [['err', 'Sync stopped: ' + (e.message || e.code)]]; }
-  QD.busy = false;
+  QD.busy = false; qdWriteBackSoon();
   if (force) { const errs = QD.issues.filter(i => i[0] === 'err').length; toast((changed ? changed + ' invoice(s) updated from Quote Desk' : 'No new changes from Quote Desk') + (errs ? ' · ' + errs + ' need your attention (see the yellow box)' : ''), errs ? 'warn' : 'ok'); }
   if (['sales', 'dashboard'].includes(VIEW.page) && (!VIEW.sub || VIEW.page === 'sales')) render();
   if (QD.again) { QD.again = false; qdSchedule(); }
+}
+/* ---------- Write-back: Books → Quote Desk (paid status, balance and job closed) ---------- */
+let qdWBTimer = null, qdWBBusy = false;
+function qdWriteBackSoon() { if (!FB) return; clearTimeout(qdWBTimer); qdWBTimer = setTimeout(qdWriteBack, 1500); }
+async function qdWriteBack() {
+  if (!FB || !QD.quotes || !DB || qdWBBusy) return; qdWBBusy = true;
+  try {
+    for (const q of Object.values(QD.quotes)) {
+      if (!q.no || ['Cancelled', 'Revised'].includes(q.status)) continue;
+      const d = S.data.sales.find(x => x.type === 'invoice' && x.source === 'Quote Desk' && x.status === 'posted' && (x.qdId === q.id || x.id === 'qd_' + q.id)); if (!d) continue;
+      const open = r2(openAmount(d)); const paid = open <= 0.005; const closed = !!d.jobClosed; const upd = {}; const what = [];
+      if (paid && q.status !== 'Paid') { let last = ''; S.data.payments.forEach(p => { if (p.status === 'posted' && (p.allocations || []).some(a => a.docId === d.id) && p.date > last) last = p.date; }); upd.status = 'Paid'; upd.paidAt = last || today(); upd.booksPaid = true; what.push('marked Paid (receipt recorded in Books)'); }
+      else if (!paid && q.status === 'Paid' && q.booksPaid) { upd.status = 'Unpaid'; upd.paidAt = ''; upd.booksPaid = false; what.push('back to Unpaid (receipt removed in Books)'); }
+      if (!!q.booksJobClosed !== closed) { upd.booksJobClosed = closed; what.push(closed ? 'job closed in Books' : 'job reopened in Books'); }
+      if (q.booksBalance !== open) upd.booksBalance = open;
+      if (!Object.keys(upd).length) continue;
+      const at = new Date().toISOString(); if (what.length) upd.log = [...(q.log || []), { at, by: S.user.name || 'CityCube Books', what: 'CityCube Books: ' + what.join(', ') }].slice(-30);
+      try { await DB.collection('quotes').doc(q.id).set(upd, { merge: true }); } catch (e) { console.warn('Quote Desk write-back failed', e); if (e && e.code === 'permission-denied') { toast('Books could not update Quote Desk (permission). Check that admins can edit quotes in the Firestore rules.', 'err'); break; } }
+    }
+  } finally { qdWBBusy = false; }
 }
 function qdPanel() {
   if (!FB) return '';
