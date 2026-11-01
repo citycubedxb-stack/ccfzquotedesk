@@ -1056,6 +1056,7 @@ function accHint(code, asOf, delta) {
   const H = hintData(asOf); const isPL = a.type === 'I' || a.type === 'X';
   const b = r2((isPL ? H.pl[code] : H.bal[code]) || 0);
   let s = (isPL ? 'This year ' : a.grp === 'cash' ? 'Available ' : 'Balance ') + drcr(b);
+  if (!delta && a.grp === 'cash' && b < -0.005) return `<span class="neg">${s} · negative – record the cash / bank funding</span>`;
   if (delta) { const after = r2(b + delta); s += ' → after ' + drcr(after); if (a.grp === 'cash' && after < -0.005) return `<span class="neg">${s} · overdrawn</span>`; }
   return s;
 }
@@ -1249,7 +1250,7 @@ function docEditor(m, side) {
   function calcShow() {
     const c = calcDoc(d, side);
     // live hints: contact position, line accounts, stock & margin, cash after payment
-    const hb = $('#ctHint'); if (hb) { const cc = contact(d.contactId); let h = cc ? contactHint(cc, side === 'S' ? 'S' : 'P', d.date) : ''; if (cc && side === 'S' && d.type === 'invoice' && d.status === 'draft' && num(cc.creditLimit)) { const after = r2(((hintData(d.date).ct[cc.id] || {}).ar || 0) + c.totalA); if (after > num(cc.creditLimit)) h += ' <span class="sep">·</span> <span class="neg"><b>Over credit limit after this invoice (AED ' + fmt(after) + ')</b></span>'; } if (side === 'P' && d.type === 'bill' && d.paidFrom) h += (h ? ' <span class="sep">·</span> ' : '') + esc(accName(d.paidFrom)) + ': ' + accHint(d.paidFrom, d.date, -c.totalA); hb.innerHTML = h; hb.style.display = h ? '' : 'none'; }
+    const hb = $('#ctHint'); if (hb) { const cc = contact(d.contactId); let h = cc ? contactHint(cc, side === 'S' ? 'S' : 'P', d.date) : ''; if (cc && side === 'S' && d.type === 'invoice' && d.status === 'draft' && num(cc.creditLimit)) { const after = r2(((hintData(d.date).ct[cc.id] || {}).ar || 0) + c.totalA); if (after > num(cc.creditLimit)) h += ' <span class="sep">·</span> <span class="neg"><b>Over credit limit after this invoice (AED ' + fmt(after) + ')</b></span>'; } if (side === 'P' && d.type === 'bill' && d.paidFrom) h += (h ? ' <span class="sep">·</span> ' : '') + esc(accName(d.paidFrom)) + ': ' + accHint(d.paidFrom, d.date, d.status === 'draft' ? -c.totalA : 0); hb.innerHTML = h; hb.style.display = h ? '' : 'none'; }
     $$('tr[data-i]', tb).forEach((tr, i) => { const l = d.lines[i]; if (!l) return; const cl = c.lines[i]; const ha = $('[data-h="acc"]', tr); if (ha) ha.innerHTML = l.acc ? accHint(l.acc, d.date) : ''; const hi = $('[data-h="item"]', tr); if (hi) { const it = item(l.itemId); hi.innerHTML = it && d.status === 'draft' ? itemHint(it, side, num(l.qty) ? r2(cl.netA / num(l.qty)) : 0, l.qty) : ''; } });
     $$('tr[data-i]', tb).forEach((tr, i) => { const cl = c.lines[i]; if (!cl) return; $('[data-o="net"]', tr).textContent = fmt(cl.net); $('[data-o="vat"]', tr).textContent = fmt(cl.vat); });
     const cur = d.currency || 'AED'; const fx = cur !== 'AED';
