@@ -97,6 +97,7 @@ body.locked #side,body.locked .search,body.locked .quick,body.locked #menuBtn{di
 .lh{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.25;white-space:normal}.lh:empty{display:none}.warnt{color:var(--amb)!important}
 .hintbar{background:#f4f6fb;border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:8px;padding:7px 12px;margin:2px 0 12px;font-size:12.5px;color:var(--ink2);line-height:1.6}.hintbar:empty{display:none}.hintbar .sep{color:#b8c0cf;margin:0 2px}
 .profit{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:8px 0 10px}.pgrid>div{background:#f6f8fc;border:1px solid var(--line);border-radius:8px;padding:8px 10px}.pgrid span{display:block;font-size:11.5px;color:var(--ink2)}.pgrid b{font:700 17px var(--f-display);color:var(--acc)}.pgrid .pos b{color:var(--grn)}.pgrid .neg b{color:var(--red)}
+.threshbar{position:relative;height:14px;background:#eef1f6;border-radius:8px;margin:18px 0 26px;max-width:700px}.threshbar div{height:100%;background:var(--acc);border-radius:8px}.threshbar div.near{background:var(--orange)}.threshbar div.over{background:var(--red)}.threshbar span{position:absolute;top:16px;transform:translateX(-50%);font-size:11px;color:var(--mut)}
 </style></head><body>
 <script>var BOOKS_TARGET = 'firebase';
 /* CityCube brand assets (from the CityCube Quote Desk letterhead) */
@@ -789,6 +790,17 @@ function aging(side, asOf) {
   return Object.values(res).sort((a, b) => b.total - a.total);
 }
 
+/* ---------- VAT registration threshold monitor (Art. 13–14 VAT Decree-Law; Cabinet Decision 52/2017 Art. 7–8) ---------- */
+const vatOn = () => !!S.settings.vatRegistered;
+function vatThreshold(asOf) {
+  asOf = asOf || today(); const from = addDays(addMonths(asOf, -12), 1); let sup = 0, imp = 0, exp = 0;
+  // not registered: everything you sell counts except exempt supplies (it would be standard- or zero-rated once registered)
+  S.data.sales.filter(d => isLive(d) && ['invoice', 'credit'].includes(d.type) && d.date >= from && d.date <= asOf).forEach(d => { const c = calcDoc(d, 'S'); const sg = d.type === 'credit' ? -1 : 1; c.lines.forEach(l => { if (vatOn() ? ['SR', 'ZR'].includes(l.code) : l.code !== 'EX') sup += sg * l.netA; }); });
+  S.data.purchases.filter(d => isLive(d) && ['bill', 'debit'].includes(d.type) && d.date >= from && d.date <= asOf).forEach(d => { const c = calcDoc(d, 'P'); const sg = d.type === 'debit' ? -1 : 1; const foreign = (contact(d.contactId) || {}).country && (contact(d.contactId) || {}).country !== 'AE'; c.lines.forEach(l => { if (['RC', 'IM'].includes(l.code) || foreign) imp += sg * l.netA; if (['SR', 'SRN', 'RC', 'IM'].includes(l.code) || (!vatOn() && !['EX', 'ZR'].includes(l.code))) exp += sg * l.netA; }); });
+  const taxable = r2(sup + imp);
+  return { from, to: asOf, supplies: r2(sup), imports: r2(imp), taxable, expenses: r2(exp), mandatory: 375000, voluntary: 187500, pct: taxable / 375000 * 100, mustRegister: taxable > 375000, mayRegister: taxable > 187500 || exp > 187500 };
+}
+
 /* ===================== UI framework ===================== */
 const NAV = [
   ['dashboard', 'Dashboard', 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z'],
@@ -1138,7 +1150,7 @@ function docListPage(m, side) {
   const overdue = rows.filter(r => r.st[0] === 'Overdue').reduce((s, r) => s + r.open * (num(r.d.rate) || 1), 0);
   m.innerHTML = pageHead(side === 'S' ? 'Sales' : 'Purchases & Expenses', side === 'S' ? (FB ? 'Tax invoices from Quote Desk, receipts and tax credit notes' : 'Quotations, FTA-compliant tax invoices and tax credit notes') : 'Purchase orders, supplier bills, expenses, imports and reverse charge',
     `${side === 'S' && !FB ? '<button class="btn" id="qdImp">Import from Quote Desk</button>' : ''}${side === 'P' ? '<button class="btn primary" data-newbill="purchase">+ Purchase (goods)</button><button class="btn" data-newbill="expense">+ Expense</button>' + (['debit', 'po'].includes(tab) ? '<button class="btn" id="newDoc">+ New ' + esc(T[tab][0].toLowerCase()) + '</button>' : '') : (FB && tab === 'invoice' ? '' : '<button class="btn primary" id="newDoc">+ New ' + esc(T[tab][0].toLowerCase()) + '</button>')}`) +
-    (side === 'S' ? qdPanel() : '') + tabs(side === 'P' ? P_TABS : Object.entries(T).filter(([k]) => tabKeys.includes(k)).map(([k, v]) => [k, v[0] + 's']), tab) +
+    (side === 'S' ? qdPanel() : '') + tabs(side === 'P' ? P_TABS : Object.entries(T).filter(([k]) => tabKeys.includes(k)).map(([k, v]) => [k, (vatOn() ? v[0] : v[0].replace(/^Tax /, '').replace(/^./, c => c.toUpperCase())) + 's']), tab) +
     `<div class="kpis sm"><div class="kpi"><span>Documents</span><b>${rows.length}</b></div><div class="kpi"><span>Outstanding (AED)</span><b>${fmt(out)}</b></div><div class="kpi"><span>Overdue (AED)</span><b class="${overdue > 0 ? 'neg' : ''}">${fmt(overdue)}</b></div><div class="kpi"><span>Total value (AED)</span><b>${fmt(rows.filter(r => r.d.status === 'posted').reduce((s, r) => s + r.totalA, 0))}</b></div></div>
     <div class="card"><div class="toolbar"><input id="dq" placeholder="Filter by number, party, reference" value="${esc(VIEW.params.q || '')}"><select id="df">${['all', 'draft', 'unpaid', 'partpaid', 'overdue', 'paid', 'posted', 'void', 'open'].map(x => opt(x, x === 'all' ? 'All statuses' : x === 'partpaid' ? 'Part paid' : x[0].toUpperCase() + x.slice(1), f)).join('')}</select><span class="grow"></span>${exportBar('#docTbl', (side === 'S' ? 'Sales_' : 'Purchases_') + tab)}</div>
     ${dataTable([{ k: 'no', l: 'Number', fmt: (v, r) => (v || 'Draft') + ((r.d.attachments || []).length ? ' 📎' : '') }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }, ...(side === 'S' && tab === 'invoice' ? [{ k: 'mg', l: 'Margin', num: 1, html: r => { if (r.d.status !== 'posted') return ''; const P = invoiceProfit(r.d); return P.rev ? `<span class="${P.pct < 0 ? 'neg' : P.pct < 10 ? 'warnt' : ''}">${r.d.jobClosed ? '🔒 ' : ''}${P.pct.toFixed(1)}%</span>` : ''; } }] : []), { k: 'x', l: '', cls: 'noprint', html: r => r.open > 0.005 ? `<button class="btn sm" data-qpay="${r.d.id}">${side === 'S' ? 'Receive' : 'Pay'}</button>` : '' }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
@@ -1158,7 +1170,7 @@ PAGES.sales = (m) => docListPage(m, 'S');
 PAGES.purchases = (m) => docListPage(m, 'P');
 
 function blankDoc(side, type, extra) {
-  const s = S.settings; const d = { id: uid(), type, no: '', date: today(), status: 'draft', contactId: '', currency: 'AED', rate: 1, lines: [{ qty: 1, price: 0, disc: 0, vat: 'SR', desc: '' }], notes: '' };
+  const s = S.settings; const d = { id: uid(), type, no: '', date: today(), status: 'draft', contactId: '', currency: 'AED', rate: 1, lines: [{ qty: 1, price: 0, disc: 0, vat: s.vatRegistered ? 'SR' : (side === 'S' ? 'OS' : 'SRN'), desc: '' }], notes: '' };
   if (side === 'S') { d.supplyDate = ''; d.dueDate = addDays(today(), 30); d.emirate = s.emirate || 'DXB'; d.terms = type === 'quote' ? 'Quotation valid for 30 days.' : s.invTerms; if (type === 'credit') d.returnStock = true; if (type === 'quote') d.dueDate = addDays(today(), 30); }
   else { d.dueDate = addDays(today(), 30); d.supplierInvNo = ''; if (type === 'bill' || type === 'debit' || type === 'po') d.billKind = (extra && extra.billKind) || (extra && extra.expense ? 'expense' : 'purchase'); if (type === 'bill') { const pf = lsGet('lastPay-' + d.billKind, ''); if (pf && acc(pf)) { d.paidFrom = pf; d.paidDate = today(); } } if (extra && extra.expense) { d.paidFrom = lsGet('lastPaidFrom', (bankAccs()[0] || {}).code || '1100'); d.paidDate = today(); d.isExpense = true; } }
   return d;
@@ -1172,7 +1184,7 @@ function docEditor(m, side) {
   d = JSON.parse(JSON.stringify(d));
   const ro = d.status !== 'draft'; const isPurch = side === 'P' && billKind(d) === 'purchase' && d.type !== 'po' || (side === 'P' && d.type === 'po' && d.billKind !== 'expense');
   const showAcc = !isPurch; const showItem = side === 'S' || isPurch || d.lines.some(l => l.itemId);
-  const tName = side === 'P' && d.type === 'bill' ? (isPurch ? 'Purchase bill (goods)' : 'Expense bill') : T[d.type][0];
+  const tName = side === 'P' && d.type === 'bill' ? (isPurch ? 'Purchase bill (goods)' : 'Expense bill') : (side === 'S' && !vatOn() && d.type === 'invoice') ? 'Invoice' : (side === 'S' && !vatOn() && d.type === 'credit') ? 'Credit note' : T[d.type][0];
   const ct = contact(d.contactId); const codes = side === 'S' ? VAT_SALES : VAT_PURCH;
   const otherParty = side === 'S' ? 'C' : 'S';
   const againstList = (side === 'S' ? S.data.sales.filter(x => x.type === 'invoice') : S.data.purchases.filter(x => x.type === 'bill')).filter(x => x.status === 'posted' && (!d.contactId || x.contactId === d.contactId));
@@ -1202,7 +1214,7 @@ function docEditor(m, side) {
     </div>
     <div class="hintbar" id="ctHint"></div>
     ${ct && side === 'S' && ct.vatRegistered && !ct.trn ? '<div class="alert warn">This customer is marked VAT-registered but has no TRN. The recipient TRN must appear on a full tax invoice.</div>' : ''}
-    ${!S.settings.trn && side === 'S' && d.type !== 'quote' ? '<div class="alert warn">Your company TRN is not set (Company & Settings). A tax invoice must show the supplier TRN.</div>' : ''}
+    ${!S.settings.trn && S.settings.vatRegistered && side === 'S' && d.type !== 'quote' ? '<div class="alert warn">Your company TRN is not set (Company & Settings). A tax invoice must show the supplier TRN.</div>' : ''}
     <div class="tblwrap"><table class="tbl lines" id="lines"><thead><tr>${showItem ? '<th style="width:16%">Item</th>' : ''}<th>Description</th><th class="n" style="width:7%">Qty</th><th class="n" style="width:9%">Unit ${side === 'P' ? 'cost' : 'price'}</th><th class="n" style="width:6%">Disc %</th><th style="width:14%">VAT</th>${showAcc ? `<th style="width:16%">${side === 'S' ? 'Income account' : 'Expense account'}</th>` : ''}<th class="n" style="width:9%">Amount</th><th class="n" style="width:7%">VAT</th><th style="width:30px"></th></tr></thead><tbody></tbody></table></div>
     ${ro ? '' : '<button class="btn sm" id="addLine">+ Add line</button>'}${isPurch ? '<span class="small muted" style="margin-left:10px">Goods for resale: stock items go to inventory and move to cost of goods sold when sold; other lines (freight, duty, non-stock goods) go straight to cost of goods sold.</span>' : ''}
     <div class="docbottom"><div class="grow">
@@ -1228,7 +1240,7 @@ function docEditor(m, side) {
       <td class="n" data-o="net"></td><td class="n" data-o="vat"></td>
       <td style="white-space:nowrap">${side === 'P' && ['bill', 'debit'].includes(d.type) && !tracksStock(l.itemId) && d.status !== 'void' ? `<button class="iconbtn sm" data-job="${i}" title="Link / split this line to sales invoices (job costing)">🔗</button>` : ''}${ro ? '' : `<button class="iconbtn sm" data-del="${i}" title="Remove">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
     if (ro) $$('input,select', tb).forEach(x => x.disabled = true);
-    const applyItem = (i) => { const it = item(d.lines[i].itemId); if (!it) return; const l = d.lines[i]; l.desc = it.name + (it.description ? ' – ' + it.description : ''); l.price = side === 'S' ? (it.price || 0) : (it.cost || 0); l.vat = side === 'S' ? (it.vatS || defaultVat(side)) : (it.vatP || defaultVat(side)); l.acc = (it.type === 'goods' && side === 'P') || isPurch ? '' : (side === 'S' ? it.salesAcc : it.purchAcc) || ''; if (d.rate && num(d.rate) !== 1 && l.price) l.price = r2(num(l.price) / num(d.rate)); };
+    const applyItem = (i) => { const it = item(d.lines[i].itemId); if (!it) return; const l = d.lines[i]; l.desc = it.name + (it.description ? ' – ' + it.description : ''); l.price = side === 'S' ? (it.price || 0) : (it.cost || 0); l.vat = !vatOn() ? defaultVat(side) : side === 'S' ? (it.vatS || defaultVat(side)) : (it.vatP || defaultVat(side)); l.acc = (it.type === 'goods' && side === 'P') || isPurch ? '' : (side === 'S' ? it.salesAcc : it.purchAcc) || ''; if (d.rate && num(d.rate) !== 1 && l.price) l.price = r2(num(l.price) / num(d.rate)); };
     $$('[data-l]', tb).forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
       const i = Number(el.closest('tr').dataset.i); const k = el.dataset.l;
       if (el.value === NEWOPT) {
@@ -1247,7 +1259,7 @@ function docEditor(m, side) {
     $$('[data-del]', tb).forEach(b => b.onclick = () => { d.lines.splice(Number(b.dataset.del), 1); if (!d.lines.length) d.lines.push({ qty: 1, price: 0, vat: defaultVat(side) }); drawLines(); });
     calcShow();
   }
-  function defaultVat(side) { const c = contact(d.contactId); if (c && c.defaultVat) return c.defaultVat; if (c && c.country && c.country !== 'AE' && c.country !== 'United Arab Emirates') return side === 'S' ? 'ZR' : 'RC'; return 'SR'; }
+  function defaultVat(side) { if (!vatOn()) return side === 'S' ? 'OS' : 'SRN'; const c = contact(d.contactId); if (c && c.defaultVat) return c.defaultVat; if (c && c.country && c.country !== 'AE' && c.country !== 'United Arab Emirates') return side === 'S' ? 'ZR' : 'RC'; return 'SR'; }
   function calcShow() {
     const c = calcDoc(d, side);
     // live hints: contact position, line accounts, stock & margin, cash after payment
@@ -1333,7 +1345,9 @@ function validateDoc(d, side, posting) {
   d.lines.forEach((l, i) => { if (!l.desc && !l.itemId) errs.push('Line ' + (i + 1) + ': description required.'); if (side === 'P' && billKind(d) === 'expense' && !tracksStock(l.itemId) && !l.acc && num(l.price)) errs.push('Line ' + (i + 1) + ': choose the expense / asset account.'); if (num(l.qty) < 0 || num(l.price) < 0) errs.push('Line ' + (i + 1) + ': use a credit/debit note instead of negative amounts.'); });
   if (!num(d.rate) || num(d.rate) <= 0) errs.push('Exchange rate must be positive.');
   if (posting && isLocked(d.date)) errs.push('The date falls in a locked period (≤ ' + fmtD(S.settings.lockDate) + ').');
-  if (posting && side === 'S' && ['invoice', 'credit'].includes(d.type)) {
+  if (posting && !vatOn() && side === 'S' && d.lines.some(l => ['SR'].includes(l.vat))) warns.push('Your company is not registered for VAT – it must not charge VAT. Use "OS – Out of scope" on the lines (Company & Settings › Tax if you are registered).');
+  if (posting && !vatOn() && side === 'P' && d.lines.some(l => ['SR', 'RC', 'IM'].includes(l.vat))) warns.push('Your company is not registered for VAT, so input VAT cannot be reclaimed. Use "SRN" – the VAT paid becomes part of the cost.');
+  if (posting && side === 'S' && ['invoice', 'credit'].includes(d.type) && vatOn()) {
     if (ct && ct.vatRegistered && !ct.trn) errs.push('Customer is VAT-registered: recipient TRN is mandatory on a tax invoice.');
     if (!S.settings.trn && S.settings.vatRegistered) warns.push('Company TRN not set – it must appear on tax invoices.');
     if (d.supplyDate && daysBetween(d.supplyDate, d.date) > 14) warns.push('Invoice issued more than 14 days after the date of supply (Art. 67 VAT Decree-Law). Administrative penalties may apply.');
@@ -1395,13 +1409,13 @@ function amountWords(n, cur) { const i = Math.floor(Math.abs(n)), f = Math.round
 /* ---------- Printable tax invoice / credit note / PO (Art. 59 & 60 Executive Regulation) ---------- */
 function docPrintHTML(d, side) {
   const s = S.settings; const c = calcDoc(d, side); const ct = docParty(d) || {}; const cur = d.currency || 'AED'; const fx = cur !== 'AED';
-  const titles = { invoice: ['TAX INVOICE', 'فاتورة ضريبية'], credit: ['TAX CREDIT NOTE', 'إشعار دائن ضريبي'], quote: ['QUOTATION', 'عرض سعر'], bill: ['PURCHASE BILL (internal)', 'فاتورة شراء'], debit: ['DEBIT NOTE', 'إشعار مدين'], po: ['PURCHASE ORDER', 'أمر شراء'] };
+  const titles = { invoice: S.settings.vatRegistered ? ['TAX INVOICE', 'فاتورة ضريبية'] : ['INVOICE', 'فاتورة'], credit: S.settings.vatRegistered ? ['TAX CREDIT NOTE', 'إشعار دائن ضريبي'] : ['CREDIT NOTE', 'إشعار دائن'], quote: ['QUOTATION', 'عرض سعر'], bill: ['PURCHASE BILL (internal)', 'فاتورة شراء'], debit: ['DEBIT NOTE', 'إشعار مدين'], po: ['PURCHASE ORDER', 'أمر شراء'] };
   const [tEn, tAr] = titles[d.type]; const orig = d.againstId ? byId(side === 'S' ? 'sales' : 'purchases', d.againstId) : null;
   const draft = d.status !== 'posted' ? '<div class="wm">' + (d.status === 'void' ? 'VOID' : 'DRAFT') + '</div>' : '';
   const vatByRate = {}; c.lines.forEach(l => { const k = l.code; vatByRate[k] = vatByRate[k] || { net: 0, vat: 0, netA: 0, vatA: 0 }; vatByRate[k].net += l.net; vatByRate[k].vat += l.vat; vatByRate[k].netA += l.netA; vatByRate[k].vatA += l.vatA; });
   return `<div class="inv">${draft}
   <div class="ih"><div class="ico"><div class="logo">${cubeSvg(46)}</div><div><div class="cn">${esc(s.name)}</div><div class="cnar" dir="rtl">${esc(s.nameAr || '')}</div><div class="cad">${esc([s.address, s.poBox ? 'P.O. Box ' + s.poBox : '', s.freezone, EMIRATES.find(e => e[0] === s.emirate)?.[1], 'United Arab Emirates'].filter(Boolean).join(', '))}<br>${esc([s.phone, s.email, s.website].filter(Boolean).join(' · '))}</div></div></div>
-  <div class="it"><div class="t1">${tEn}</div><div class="t2" dir="rtl">${tAr}</div>${side === 'S' && d.type !== 'quote' || d.type === 'po' ? `<div class="trn">TRN / الرقم الضريبي: <b>${esc(s.trn || '—')}</b></div>` : ''}</div></div>
+  <div class="it"><div class="t1">${tEn}</div><div class="t2" dir="rtl">${tAr}</div>${(side === 'S' && d.type !== 'quote' || d.type === 'po') && s.vatRegistered ? `<div class="trn">TRN / الرقم الضريبي: <b>${esc(s.trn || '—')}</b></div>` : ''}</div></div>
   <div class="ib"><div class="box"><div class="lbl">${side === 'S' ? 'Bill to / العميل' : 'Supplier / المورد'}</div><b>${esc(ct.name || '')}</b><br>${esc([ct.address, ct.city, ct.countryName || ct.country].filter(Boolean).join(', '))}${ct.trn ? `<br>TRN: <b>${esc(ct.trn)}</b>` : ''}${ct.phone ? '<br>' + esc(ct.phone) : ''}</div>
   <div class="box meta2"><table>
    <tr><td>${d.type === 'credit' ? 'Credit note no.' : d.type === 'quote' ? 'Quotation no.' : d.type === 'po' ? 'PO no.' : 'Invoice no.'}</td><td><b>${esc(d.no || 'DRAFT')}</b></td></tr>
@@ -1424,7 +1438,7 @@ function docPrintHTML(d, side) {
   <div class="it2"><table><tr><td>Total excl. VAT</td><td class="n">${cur} ${fmt(c.net)}</td></tr><tr><td>VAT</td><td class="n">${cur} ${fmt(side === 'S' ? c.vat : c.payVat)}</td></tr><tr class="g"><td>${d.type === 'credit' ? 'Total credit' : 'Total amount payable'}</td><td class="n">${cur} ${fmt(c.total)}</td></tr>
   ${fx ? `<tr><td>VAT payable in AED</td><td class="n">AED ${fmt(c.vatA)}</td></tr><tr><td>Total in AED</td><td class="n">AED ${fmt(c.totalA)}</td></tr>` : ''}</table></div></div>
   <div class="isig"><div>Prepared by</div><div>Authorised signatory</div><div>Received by (name, signature & stamp)</div></div>
-  <div class="ifine">${side === 'S' && d.type === 'invoice' ? 'This is a tax invoice issued under Federal Decree-Law No. 8 of 2017 on VAT, as amended.' : ''} ${esc(s.name)}${s.licenceNo ? ' · Licence ' + esc(s.licenceNo) : ''}</div></div>`;
+  <div class="ifine">${side === 'S' && d.type === 'invoice' ? (S.settings.vatRegistered ? 'This is a tax invoice issued under Federal Decree-Law No. 8 of 2017 on VAT, as amended.' : 'The supplier is not registered for VAT – no VAT is charged.') : ''} ${esc(s.name)}${s.licenceNo ? ' · Licence ' + esc(s.licenceNo) : ''}</div></div>`;
 }
 
 /* ---------- UBL 2.1 / Peppol PINT AE draft XML (for submission through an Accredited Service Provider) ---------- */
@@ -2003,7 +2017,15 @@ PAGES.vat = (m) => {
   $$('[data-tab]', m).forEach(b => b.onclick = () => { VIEW.tab = b.dataset.tab; VIEW.params = {}; render(); });
   const host = $('#vh');
   if (!S.settings.vatRegistered) host.insertAdjacentHTML('beforebegin', '<div class="alert warn">Company is set as not VAT-registered. Mandatory registration applies once taxable supplies and imports exceed AED 375,000 in the past 12 months or are expected to in the next 30 days (voluntary from AED 187,500).</div>');
-  if (tab === 'returns') {
+  if (tab === 'returns' && !S.settings.vatRegistered) {
+    const th = vatThreshold(today());
+    host.innerHTML = `<div class="card"><h3>VAT registration threshold monitor</h3><p>Your company is set as <b>not registered for VAT</b>, so there are no VAT returns to file and invoices are issued without VAT. Books watches your turnover against the registration thresholds (rolling 12 months to ${fmtD(th.to)}):</p>
+    <table class="tbl fst"><tbody><tr><td>Taxable supplies (standard and zero-rated sales)</td><td class="n">${fmt(th.supplies)}</td></tr><tr><td>Imports of goods and services</td><td class="n">${fmt(th.imports)}</td></tr><tr class="tot"><td>Total for the mandatory test</td><td class="n">${fmt(th.taxable)}</td></tr><tr><td>Mandatory threshold – must register within 30 days of exceeding</td><td class="n">375,000.00</td></tr><tr><td>Voluntary threshold – supplies or taxable expenses</td><td class="n">187,500.00</td></tr><tr><td>Taxable expenses (for the voluntary test)</td><td class="n">${fmt(th.expenses)}</td></tr></tbody></table>
+    <div class="threshbar"><div style="width:${Math.min(100, th.pct)}%" class="${th.mustRegister ? 'over' : th.pct >= 70 ? 'near' : ''}"></div><span style="left:50%">187,500</span><span style="left:100%">375,000</span></div>
+    ${th.mustRegister ? '<div class="alert err"><b>Registration is mandatory.</b> Apply on EmaraTax within 30 days of the month in which the threshold was exceeded – late registration carries an AED 10,000 administrative penalty. Once registered, tick "Registered for VAT", enter the TRN and the effective date in Company & Settings.</div>' : th.mayRegister ? '<div class="alert warn">You may register voluntarily (above AED 187,500). Registration lets you reclaim input VAT on your purchases and imports.</div>' : ''}
+    <p class="muted small">You must also register if you expect to exceed AED 375,000 in the next 30 days. Out-of-scope and exempt supplies are excluded. This monitor is a guide – confirm with your tax agent.</p></div>`;
+  }
+  if (tab === 'returns' && S.settings.vatRegistered) {
     const periods = vatPeriodsList();
     const rows = periods.map(p => { const saved = S.data.vatreturns.find(v => v.from === p.from && v.to === p.to); const { B } = computeVAT(p.from, p.to); const t = vatTotals(B, saved && saved.adj); const due = vatDue(p.to); const st = saved && saved.status === 'filed' ? (saved.paidOn ? 'Filed & settled' : 'Filed') : (p.to < today() ? (due < today() ? 'Overdue' : 'Due') : 'Open'); return { p, period: fmtD(p.from) + ' – ' + fmtD(p.to), due, out: saved && saved.status === 'filed' ? saved.boxes.b12 : t.b12, inp: saved && saved.status === 'filed' ? saved.boxes.b13 : t.b13, net: saved && saved.status === 'filed' ? saved.boxes.b14 : t.b14, st, ref: saved ? saved.ftaRef || '' : '' }; });
     host.innerHTML = `<div class="card">${dataTable([{ k: 'period', l: 'Tax period' }, { k: 'due', l: 'Filing & payment due', fmt: fmtD }, { k: 'out', l: 'Output VAT (Box 12)', num: 1 }, { k: 'inp', l: 'Recoverable (Box 13)', num: 1 }, { k: 'net', l: 'Payable / (refundable)', num: 1 }, { k: 'ref', l: 'FTA ref.' }, { k: 'st', l: 'Status', html: r => badge(r.st, { 'Filed & settled': 'green', Filed: 'blue', Overdue: 'red', Due: 'amber', Open: 'grey' }[r.st]) }], rows, { onRow: r => go('vat', 'return', null, { from: r.p.from, to: r.p.to }) })}
@@ -2090,9 +2112,11 @@ function buildFAF(from, to) {
 function complianceChecks() {
   const s = S.settings; const items = [];
   const add = (ok, title, detail, sev = 'warn') => items.push({ ok, title, detail, sev });
-  add(!!s.trn && /^\d{15}$/.test(s.trn), 'Company TRN (15 digits) recorded', s.trn ? 'TRN ' + s.trn : 'Set it in Company & Settings – required on every tax invoice.', 'err');
+  if (!s.vatRegistered) { const th = vatThreshold(today()); add(!th.mustRegister, 'Below the VAT registration threshold', 'AED ' + fmt(th.taxable) + ' taxable supplies & imports in the last 12 months (mandatory above AED 375,000)', 'err'); const vatCharged = S.data.sales.filter(d => isLive(d) && d.type === 'invoice' && d.lines.some(l => l.vat === 'SR')); add(!vatCharged.length, 'No VAT charged while not registered', vatCharged.length ? vatCharged.length + ' invoice(s) charge 5% VAT although the company is not VAT-registered: ' + vatCharged.slice(0, 8).map(d => d.no).join(', ') : 'All good', 'err'); }
+  if (s.vatRegistered) add(!!s.trn && /^\d{15}$/.test(s.trn), 'Company TRN (15 digits) recorded', s.trn ? 'TRN ' + s.trn : 'Set it in Company & Settings – required on every tax invoice.', 'err');
   add(!!s.ctTrn, 'Corporate Tax registration number recorded', 'Every UAE juridical person, including free zone companies, must register for Corporate Tax.');
   add(!!s.licenceNo && (!s.licenceExpiry || s.licenceExpiry > today()), 'Trade licence valid', s.licenceExpiry ? 'Expires ' + fmtD(s.licenceExpiry) : 'Record licence number and expiry date.');
+  if (s.vatRegistered) {
   const missingTrn = S.data.contacts.filter(c => c.vatRegistered && !c.trn); add(!missingTrn.length, 'VAT-registered contacts have a TRN', missingTrn.map(c => c.name).join(', ') || 'All good');
   const badTrn = S.data.contacts.filter(c => c.trn && !/^\d{15}$/.test(c.trn)); add(!badTrn.length, 'Contact TRNs are 15 digits', badTrn.map(c => c.name).join(', ') || 'All good');
   const late = S.data.sales.filter(d => isLive(d) && d.type === 'invoice' && d.supplyDate && daysBetween(d.supplyDate, d.date) > 14); add(!late.length, 'Tax invoices issued within 14 days of supply', late.map(d => d.no).join(', ') || 'All good');
@@ -2103,6 +2127,7 @@ function complianceChecks() {
   const gaps = []; const nums = S.data.sales.filter(d => d.type === 'invoice' && d.no && d.no.startsWith(s.invPrefix || 'INV-')).map(d => parseInt(d.no.slice((s.invPrefix || 'INV-').length), 10)).filter(n => !isNaN(n)).sort((a, b) => a - b); for (let i = 1; i < nums.length; i++) if (nums[i] - nums[i - 1] > 1) gaps.push(nums[i - 1] + 1); add(!gaps.length, 'Tax invoice numbering is sequential without gaps', gaps.length ? 'Missing numbers after: ' + gaps.slice(0, 10).join(', ') : 'All good');
   const overdueRet = vatPeriodsList().filter(p => vatDue(p.to) < today() && !S.data.vatreturns.find(v => v.from === p.from && v.status === 'filed')); add(!overdueRet.length, 'All VAT returns filed on time', overdueRet.map(p => fmtD(p.from) + '–' + fmtD(p.to)).join('; ') || 'All good', 'err');
   const credits = S.data.vatreturns.filter(v => v.status === 'filed' && v.boxes && v.boxes.b14 < 0 && !v.paidOn && addMonths(v.to, 48) < today()); add(!credits.length, 'No VAT credits approaching the 5-year limit', credits.map(v => fmtD(v.to)).join(', ') || 'All good');
+  }
   const tb = balances(today()); const tot = r2(Object.values(tb).reduce((a, b) => a + b, 0)); add(Math.abs(tot) < 0.01, 'Trial balance balances', 'Difference ' + fmt(tot), 'err');
   const w = L().warnings; add(!w.length, 'All source documents post balanced entries', w.join('; ') || 'All good', 'err');
   add(!!s.lockDate, 'Closed periods are locked', s.lockDate ? 'Locked to ' + fmtD(s.lockDate) : 'Lock periods after filing VAT returns / closing months.');
@@ -2554,7 +2579,7 @@ PAGES.dashboard = (m) => {
     <div class="kpi"><span>Receivables</span><b>${fmt(ar, 0)}</b><i>${overdue.length} overdue</i></div>
     <div class="kpi"><span>Payables</span><b>${fmt(ap, 0)}</b><i>${billsDue.length} due in 14 days</i></div>
     <div class="kpi"><span>Inventory</span><b>${fmt(inv, 0)}</b><i>${low.length} to reorder</i></div>
-    <div class="kpi"><span>VAT this period</span><b class="${vt.b14 > 0 ? '' : 'pos'}">${fmt(vt.b14, 0)}</b><i>${vt.b14 >= 0 ? 'payable' : 'refundable'} · due ${fmtD(vatDue(vp.to))}</i></div>
+    ${s.vatRegistered ? `<div class="kpi"><span>VAT this period</span><b class="${vt.b14 > 0 ? '' : 'pos'}">${fmt(vt.b14, 0)}</b><i>${vt.b14 >= 0 ? 'payable' : 'refundable'} · due ${fmtD(vatDue(vp.to))}</i></div>` : (() => { const th = vatThreshold(t); return `<div class="kpi"><span>VAT registration threshold</span><b class="${th.mustRegister ? 'neg' : th.pct >= 70 ? 'warnt' : ''}">${th.pct.toFixed(0)}%</b><i>AED ${fmt(th.taxable, 0)} of 375,000 · last 12 months</i></div>`; })()}
     </div>
     <div class="dgrid"><div class="card"><h3>Revenue vs costs – last 12 months</h3>${barChart(chart, { la: 'Revenue', lb: 'Costs' })}</div>
     <div class="card"><h3>Compliance calendar</h3><div class="cal">${cal.map(c => `<div class="cl ${c.d < t ? 'past' : daysBetween(t, c.d) <= 14 ? 'soon' : ''}"><div class="cd"><b>${parseD(c.d).getDate()}</b><span>${MONTHS[parseD(c.d).getMonth()]} ${String(parseD(c.d).getFullYear()).slice(2)}</span></div><div><b>${esc(c.t)}</b><div class="muted small">${esc(c.n)}</div></div></div>`).join('') || '<p class="muted">Nothing upcoming.</p>'}</div></div>
@@ -2566,7 +2591,8 @@ PAGES.dashboard = (m) => {
 };
 function complianceCalendar() {
   const t = today(); const out = []; const s = S.settings;
-  let p = vatPeriodOf(addDays(t, -60)); for (let i = 0; i < 4; i++) { const due = vatDue(p.to); const filed = S.data.vatreturns.find(v => v.from === p.from && v.status === 'filed'); if (!filed && due >= addDays(t, -60)) out.push({ d: due, t: 'VAT return & payment', n: 'Period ' + fmtD(p.from) + ' – ' + fmtD(p.to) + (due < t ? ' · OVERDUE' : '') }); p = vatPeriodOf(addDays(p.to, 1)); }
+  if (!s.vatRegistered) { const th = vatThreshold(t); if (th.mustRegister) out.push({ d: t, t: 'VAT registration required', n: 'Taxable supplies & imports in the last 12 months AED ' + fmt(th.taxable, 0) + ' exceed AED 375,000 – apply on EmaraTax within 30 days' }); else if (th.pct >= 70) out.push({ d: t, t: 'Approaching VAT registration threshold', n: 'AED ' + fmt(th.taxable, 0) + ' of AED 375,000 (' + th.pct.toFixed(0) + '%) in the last 12 months' }); }
+  let p = vatPeriodOf(addDays(t, -60)); for (let i = 0; i < 4 && s.vatRegistered; i++) { const due = vatDue(p.to); const filed = S.data.vatreturns.find(v => v.from === p.from && v.status === 'filed'); if (!filed && due >= addDays(t, -60)) out.push({ d: due, t: 'VAT return & payment', n: 'Period ' + fmtD(p.from) + ' – ' + fmtD(p.to) + (due < t ? ' · OVERDUE' : '') }); p = vatPeriodOf(addDays(p.to, 1)); }
   const fe = addDays(fyStartOf(t), -1); const ctDue = monthEnd(addMonths(addDays(fe, 1), 8)); if (ctDue >= t) out.push({ d: ctDue, t: 'Corporate Tax return & payment', n: fyLabel(fyStartOf(fe)) + ' (9 months after year end)' });
   out.push({ d: fyEndOf(t), t: 'Financial year end', n: 'Stock count, close, CT provision' });
   if (s.licenceExpiry) out.push({ d: s.licenceExpiry, t: 'Trade licence renewal', n: s.freezone || 'Licensing authority' });
