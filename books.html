@@ -236,6 +236,8 @@ const accBySys = (sys) => S.data.accounts.find(a => a.sys === sys);
 const sysCode = (sys) => { const a = accBySys(sys); return a ? a.code : null; };
 const accName = (code) => { const a = acc(code); return a ? a.code + ' · ' + a.name : code; };
 const contact = (id) => S.data.contacts.find(c => c.id === id);
+/* party of a document: the contact, or the one-off 'Paid to' name/TRN on a paid expense without a supplier */
+function docParty(d) { const c = d && contact(d.contactId); if (c) return c; if (d && (d.payeeName || d.payeeTrn)) return { id: '', name: d.payeeName || 'Cash purchase', trn: (d.payeeTrn || '').replace(/\D/g, ''), country: 'AE' }; return d && d.paidFrom ? { id: '', name: 'Cash purchase', trn: '', country: 'AE' } : null; }
 const item = (id) => S.data.items.find(i => i.id === id);
 const byId = (coll, id) => S.data[coll].find(x => x.id === id);
 
@@ -511,7 +513,7 @@ function buildLedger() {
   // Purchase documents
   S.data.purchases.filter(isLive).forEach(d => {
     if (d.type !== 'bill' && d.type !== 'debit') return;
-    const c = calcDoc(d, 'P'); const sg = d.type === 'debit' ? -1 : 1; const ct = contact(d.contactId);
+    const c = calcDoc(d, 'P'); const sg = d.type === 'debit' ? -1 : 1; const ct = docParty(d);
     const e = E(d.date, d.type === 'debit' ? 'Debit note' : 'Purchase bill', d.id, d.no, (ct ? ct.name : '') + (d.supplierInvNo ? ' · Sup. inv ' + d.supplierInvNo : ''), d.contactId);
     e.add(C('AP'), -sg * c.totalA, { contactId: d.contactId });
     d.lines.forEach((l, i) => {
@@ -659,7 +661,7 @@ function computeVAT(from, to) {
     });
   });
   S.data.purchases.filter(d => isLive(d) && (d.type === 'bill' || d.type === 'debit') && d.date >= from && d.date <= to).forEach(d => {
-    const c = calcDoc(d, 'P'); const sg = d.type === 'debit' ? -1 : 1; const ct = contact(d.contactId);
+    const c = calcDoc(d, 'P'); const sg = d.type === 'debit' ? -1 : 1; const ct = docParty(d);
     c.lines.forEach((cl, i) => {
       const a = sg * cl.netA, v = sg * cl.vatA; let box = '';
       if (cl.code === 'SR') { B.b9.amt += a; B.b9.vat += v; box = 'Box 9'; }
@@ -861,7 +863,7 @@ function globalSearch(q) {
   q = q.trim().toLowerCase(); const box = $('#gres'); if (q.length < 2) { box.innerHTML = ''; return; }
   const res = [];
   S.data.sales.forEach(d => { const c = contact(d.contactId); if ((d.no + ' ' + (c ? c.name : '') + ' ' + (d.reference || '')).toLowerCase().includes(q)) res.push(['sales', d.id, d.no, (c ? c.name : '') + ' · ' + fmtD(d.date)]); });
-  S.data.purchases.forEach(d => { const c = contact(d.contactId); if ((d.no + ' ' + (c ? c.name : '') + ' ' + (d.supplierInvNo || '')).toLowerCase().includes(q)) res.push(['purchases', d.id, d.no, (c ? c.name : '') + ' · ' + fmtD(d.date)]); });
+  S.data.purchases.forEach(d => { const c = docParty(d); if ((d.no + ' ' + (c ? c.name : '') + ' ' + (d.supplierInvNo || '')).toLowerCase().includes(q)) res.push(['purchases', d.id, d.no, (c ? c.name : '') + ' · ' + fmtD(d.date)]); });
   S.data.payments.forEach(d => { const c = contact(d.contactId); if ((d.no + ' ' + (c ? c.name : '') + ' ' + (d.chequeNo || '')).toLowerCase().includes(q)) res.push(['banking', d.id, d.no, (c ? c.name : d.kind) + ' · ' + fmt(d.amount)]); });
   S.data.contacts.forEach(c => { if ((c.name + ' ' + (c.trn || '')).toLowerCase().includes(q)) res.push(['contacts', c.id, c.name, c.isCustomer ? 'Customer' : 'Supplier']); });
   S.data.items.forEach(i => { if ((i.name + ' ' + (i.sku || '')).toLowerCase().includes(q)) res.push(['inventory', i.id, i.sku + ' ' + i.name, 'Item']); });
@@ -1127,7 +1129,7 @@ function docListPage(m, side) {
   const dtype = side === 'P' && ['purchase', 'expense'].includes(tab) ? 'bill' : tab;
   const f = VIEW.params.filter || 'all'; const q = (VIEW.params.q || '').toLowerCase();
   let docs = S.data[coll].filter(d => d.type === dtype && (dtype !== 'bill' || billKind(d) === tab)).sort((a, b) => (b.date + b.no).localeCompare(a.date + a.no));
-  const rows = docs.map(d => { const c = calcDoc(d, side); const ct = contact(d.contactId); const st = docStatusLabel(d); const o = ['invoice', 'bill'].includes(d.type) && d.status === 'posted' ? openAmount(d) : null; return { d, no: d.no, date: d.date, due: d.dueDate, party: ct ? ct.name : '—', ref: d.reference || d.supplierInvNo || '', cur: d.currency || 'AED', net: c.net, vat: c.vat + (side === 'P' ? 0 : 0), total: c.total, totalA: c.totalA, open: o, st }; })
+  const rows = docs.map(d => { const c = calcDoc(d, side); const ct = docParty(d); const st = docStatusLabel(d); const o = ['invoice', 'bill'].includes(d.type) && d.status === 'posted' ? openAmount(d) : null; return { d, no: d.no, date: d.date, due: d.dueDate, party: ct ? ct.name : '—', ref: d.reference || d.supplierInvNo || '', cur: d.currency || 'AED', net: c.net, vat: c.vat + (side === 'P' ? 0 : 0), total: c.total, totalA: c.totalA, open: o, st }; })
     .filter(r => (f === 'all' || r.st[0].toLowerCase().replace(' ', '') === f) && (!q || (r.no + r.party + r.ref).toLowerCase().includes(q)));
   const out = rows.filter(r => r.open > 0).reduce((s, r) => s + r.open * (num(r.d.rate) || 1), 0);
   const overdue = rows.filter(r => r.st[0] === 'Overdue').reduce((s, r) => s + r.open * (num(r.d.rate) || 1), 0);
@@ -1176,7 +1178,7 @@ function docEditor(m, side) {
     `<button class="btn" id="back">← Back</button>`) +
     `<div class="card docform ${ro ? 'ro' : ''}">
     <div class="grid4">
-      ${field(['contactId', side === 'S' ? 'Customer' : 'Supplier', 'select', { options: (v) => contactOptions(v, otherParty), req: 1 }], d.contactId)}
+      ${field(['contactId', side === 'S' ? 'Customer' : (d.type === 'bill' && d.paidFrom ? 'Supplier (optional for paid expenses)' : 'Supplier'), 'select', { options: (v) => contactOptions(v, otherParty), req: !(side === 'P' && d.type === 'bill' && d.paidFrom) }], d.contactId)}
       ${field(['no', 'Number', 'text', { help: ro ? '' : 'Leave blank to auto-number on posting (sequential, gap-free)' }], d.no)}
       ${field(['date', d.type === 'quote' ? 'Quote date' : d.type === 'po' ? 'Order date' : side === 'S' ? 'Invoice date (date of issue)' : 'Bill date', 'date', { req: 1 }], d.date)}
       ${field(['dueDate', d.type === 'quote' ? 'Valid until' : d.type === 'po' ? 'Expected delivery' : 'Due date', 'date'], d.dueDate)}
@@ -1192,6 +1194,7 @@ function docEditor(m, side) {
       ${S.data.costcenters.length ? field(['cc', 'Cost centre / project', 'select', { options: ccOptions }], d.cc) : ''}
       ${side === 'P' && d.type === 'bill' ? field(['paidFrom', 'Payment', 'select', { options: (v) => opt('', 'Not paid yet – on credit', v) + bankAccs().map(a => opt(a.code, 'Paid now from ' + a.name + ' (AED ' + fmt(hintData().bal[a.code] || 0) + ')', v)).join(''), help: d.paidFrom ? 'Saved as paid – no separate payment voucher needed' : 'Record the payment later with the Pay button' }], d.paidFrom) : ''}
       ${side === 'P' && d.type === 'bill' && d.paidFrom ? field(['paidDate', 'Payment date', 'date'], d.paidDate || d.date) : ''}
+      ${side === 'P' && d.type === 'bill' && d.paidFrom && !d.contactId ? field(['payeeName', 'Paid to (no supplier record)', 'text', { ph: 'e.g. ENOC, RTA Parking, Carrefour' }], d.payeeName) + field(['payeeTrn', 'Supplier TRN (if on the receipt)', 'text', { max: 15, help: 'Needed to reclaim input VAT' }], d.payeeTrn) : ''}
     </div>
     <div class="hintbar" id="ctHint"></div>
     ${ct && side === 'S' && ct.vatRegistered && !ct.trn ? '<div class="alert warn">This customer is marked VAT-registered but has no TRN. The recipient TRN must appear on a full tax invoice.</div>' : ''}
@@ -1313,8 +1316,9 @@ function docActions(d, side, isNew) {
   return b.join('');
 }
 function validateDoc(d, side, posting) {
-  const errs = [], warns = []; const c = calcDoc(d, side); const ct = contact(d.contactId);
-  if (!d.contactId) errs.push((side === 'S' ? 'Customer' : 'Supplier') + ' is required.');
+  const errs = [], warns = []; const c = calcDoc(d, side); const ct = docParty(d);
+  const noSupOk = side === 'P' && d.type === 'bill' && !!d.paidFrom;
+  if (!d.contactId && !noSupOk) errs.push(side === 'S' ? 'Customer is required.' : (d.type === 'bill' ? 'Choose a supplier – or set Payment to "Paid now from …" to record a cash expense without one.' : 'Supplier is required.'));
   if (!d.date) errs.push('Date is required.');
   if (!d.lines.length || d.lines.every(l => !num(l.qty) || !num(l.price))) errs.push('Add at least one line with quantity and price.');
   d.lines.forEach((l, i) => { if (!l.desc && !l.itemId) errs.push('Line ' + (i + 1) + ': description required.'); if (side === 'P' && billKind(d) === 'expense' && !tracksStock(l.itemId) && !l.acc && num(l.price)) errs.push('Line ' + (i + 1) + ': choose the expense / asset account.'); if (num(l.qty) < 0 || num(l.price) < 0) errs.push('Line ' + (i + 1) + ': use a credit/debit note instead of negative amounts.'); });
@@ -1329,9 +1333,9 @@ function validateDoc(d, side, posting) {
     if (d.lines.some(l => l.vat === 'ZR') && (!ct || !ct.country || ct.country === 'AE')) warns.push('Zero-rated lines to a UAE customer – ensure you hold evidence for zero-rating.');
   }
   if (posting && side === 'P' && ['bill', 'debit'].includes(d.type)) {
-    if (d.lines.some(l => l.vat === 'SR') && ct && !ct.trn) warns.push('Recoverable VAT claimed but supplier TRN missing – input tax needs a valid tax invoice showing the supplier TRN.');
-    if (!d.supplierInvNo && d.type === 'bill' && !d.isExpense) warns.push('Supplier invoice number is empty.');
-    const dup = d.supplierInvNo && S.data.purchases.find(x => x.id !== d.id && x.contactId === d.contactId && x.supplierInvNo === d.supplierInvNo && x.status !== 'void');
+    if (d.lines.some(l => l.vat === 'SR') && (!ct || !ct.trn)) warns.push('Recoverable VAT claimed but supplier TRN missing – input tax needs a valid tax invoice showing the supplier TRN.');
+    if (!d.supplierInvNo && d.type === 'bill' && !d.isExpense && d.contactId) warns.push('Supplier invoice number is empty.');
+    const dup = d.supplierInvNo && d.contactId && S.data.purchases.find(x => x.id !== d.id && x.contactId === d.contactId && x.supplierInvNo === d.supplierInvNo && x.status !== 'void');
     if (dup) errs.push('Duplicate: supplier invoice ' + d.supplierInvNo + ' already recorded as ' + dup.no + '.');
   }
   const num_ = d.no && S.data[side === 'S' ? 'sales' : 'purchases'].find(x => x.id !== d.id && x.no === d.no && x.type === d.type);
@@ -1343,7 +1347,7 @@ function bindDocActions(d0, side, isNew, coll) {
   $$('[data-act]').forEach(b => b.onclick = async () => {
     const act = b.dataset.act; const d = getD(); const T = DOCTYPES[side][d.type];
     if ((act === 'post' || act === 'postnew' || act === 'save') && d.type === 'bill') lsSet('lastPay-' + billKind(d), d.paidFrom || '');
-    if (act === 'save') { const v = validateDoc(d, side, false); if (!d.contactId) { toast(v.errs[0], 'err'); return; } d.status = 'draft'; d._total = v.c.total; await store.save(coll, d); VIEW.params._draft = null; toast('Draft saved'); go(VIEW.page, 'edit', d.id); }
+    if (act === 'save') { const v = validateDoc(d, side, false); if (!d.contactId && !(side === 'P' && d.paidFrom)) { toast(v.errs[0], 'err'); return; } d.status = 'draft'; d._total = v.c.total; await store.save(coll, d); VIEW.params._draft = null; toast('Draft saved'); go(VIEW.page, 'edit', d.id); }
     if (act === 'post' || act === 'postnew') {
       const v = validateDoc(d, side, true); if (v.errs.length) { modal('Cannot post', '<ul class="errs">' + v.errs.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>', [{ label: 'OK', cls: 'primary' }]); return; }
       const doPost = async () => { if (!d.no) d.no = nextNumber(T[1]); d.status = 'posted'; d.postedAt = new Date().toISOString(); d._total = v.c.total; delete d._dueManual; delete d._paidManual; await store.save(coll, d, 'post'); VIEW.params._draft = null; toast(T[0] + ' ' + d.no + ' posted'); if (act === 'postnew') go(VIEW.page, 'edit', null, { type: d.type, expense: d.isExpense, billKind: d.billKind }); else go(VIEW.page, 'edit', d.id); };
@@ -1381,7 +1385,7 @@ function amountWords(n, cur) { const i = Math.floor(Math.abs(n)), f = Math.round
 
 /* ---------- Printable tax invoice / credit note / PO (Art. 59 & 60 Executive Regulation) ---------- */
 function docPrintHTML(d, side) {
-  const s = S.settings; const c = calcDoc(d, side); const ct = contact(d.contactId) || {}; const cur = d.currency || 'AED'; const fx = cur !== 'AED';
+  const s = S.settings; const c = calcDoc(d, side); const ct = docParty(d) || {}; const cur = d.currency || 'AED'; const fx = cur !== 'AED';
   const titles = { invoice: ['TAX INVOICE', 'فاتورة ضريبية'], credit: ['TAX CREDIT NOTE', 'إشعار دائن ضريبي'], quote: ['QUOTATION', 'عرض سعر'], bill: ['PURCHASE BILL (internal)', 'فاتورة شراء'], debit: ['DEBIT NOTE', 'إشعار مدين'], po: ['PURCHASE ORDER', 'أمر شراء'] };
   const [tEn, tAr] = titles[d.type]; const orig = d.againstId ? byId(side === 'S' ? 'sales' : 'purchases', d.againstId) : null;
   const draft = d.status !== 'posted' ? '<div class="wm">' + (d.status === 'void' ? 'VOID' : 'DRAFT') + '</div>' : '';
@@ -2062,7 +2066,7 @@ function buildFAF(from, to) {
   push([s.name, s.nameAr || '', s.trn || '', '', '', '', '', from, to, today(), 'CityCube Books ' + APP_VERSION, 'FAFv1.0.0']); push([]);
   push(['PurchaseListing']); push(['SupplierName', 'SupplierTRN', 'InvoiceDate', 'InvoiceNo', 'PermitNo', 'TransactionID', 'LineNo', 'ProductDescription', 'PurchaseValueAED', 'VATValueAED', 'TaxCode', 'FCYCode', 'PurchaseFCY', 'VATFCY']);
   let pT = 0, pV = 0, pN = 0;
-  S.data.purchases.filter(d => isLive(d) && ['bill', 'debit'].includes(d.type) && d.date >= from && d.date <= to).forEach(d => { const c = calcDoc(d, 'P'); const ct = contact(d.contactId) || {}; const sg = d.type === 'debit' ? -1 : 1; d.lines.forEach((l, i) => { const cl = c.lines[i]; push([ct.name, ct.trn || '', d.date, d.supplierInvNo || d.no, d.permitNo || '', d.no, i + 1, l.desc, (sg * cl.netA).toFixed(2), (sg * cl.vatA).toFixed(2), cl.code, d.currency || 'AED', (sg * cl.net).toFixed(2), (sg * cl.vat).toFixed(2)]); pT += sg * cl.netA; pV += sg * cl.vatA; pN++; }); });
+  S.data.purchases.filter(d => isLive(d) && ['bill', 'debit'].includes(d.type) && d.date >= from && d.date <= to).forEach(d => { const c = calcDoc(d, 'P'); const ct = docParty(d) || {}; const sg = d.type === 'debit' ? -1 : 1; d.lines.forEach((l, i) => { const cl = c.lines[i]; push([ct.name, ct.trn || '', d.date, d.supplierInvNo || d.no, d.permitNo || '', d.no, i + 1, l.desc, (sg * cl.netA).toFixed(2), (sg * cl.vatA).toFixed(2), cl.code, d.currency || 'AED', (sg * cl.net).toFixed(2), (sg * cl.vat).toFixed(2)]); pT += sg * cl.netA; pV += sg * cl.vatA; pN++; }); });
   push(['PurchaseTotalAED', r2(pT).toFixed(2), 'VATTotalAED', r2(pV).toFixed(2), 'TransactionCountTotal', pN]); push([]);
   push(['SupplyListing']); push(['CustomerName', 'CustomerTRN', 'InvoiceDate', 'InvoiceNo', 'PermitNo', 'TransactionID', 'LineNo', 'ProductDescription', 'SupplyValueAED', 'VATValueAED', 'TaxCode', 'Country', 'FCYCode', 'SupplyFCY', 'VATFCY']);
   let sT = 0, sV = 0, sN = 0;
@@ -2084,7 +2088,7 @@ function complianceChecks() {
   const badTrn = S.data.contacts.filter(c => c.trn && !/^\d{15}$/.test(c.trn)); add(!badTrn.length, 'Contact TRNs are 15 digits', badTrn.map(c => c.name).join(', ') || 'All good');
   const late = S.data.sales.filter(d => isLive(d) && d.type === 'invoice' && d.supplyDate && daysBetween(d.supplyDate, d.date) > 14); add(!late.length, 'Tax invoices issued within 14 days of supply', late.map(d => d.no).join(', ') || 'All good');
   const cnNoRef = S.data.sales.filter(d => isLive(d) && d.type === 'credit' && !d.againstId); add(!cnNoRef.length, 'Tax credit notes reference the original invoice', cnNoRef.map(d => d.no).join(', ') || 'All good');
-  const inputNoTrn = S.data.purchases.filter(d => isLive(d) && d.type === 'bill' && d.lines.some(l => l.vat === 'SR') && !(contact(d.contactId) || {}).trn); add(!inputNoTrn.length, 'Input VAT claimed only on tax invoices with supplier TRN', inputNoTrn.map(d => d.no).join(', ') || 'All good');
+  const inputNoTrn = S.data.purchases.filter(d => isLive(d) && d.type === 'bill' && d.lines.some(l => l.vat === 'SR') && !(docParty(d) || {}).trn); add(!inputNoTrn.length, 'Input VAT claimed only on tax invoices with supplier TRN', inputNoTrn.map(d => d.no).join(', ') || 'All good');
   const noDoc = S.data.purchases.filter(d => isLive(d) && d.type === 'bill' && d.lines.some(l => ['SR', 'RC', 'IM'].includes(l.vat)) && !(d.attachments || []).length); add(!noDoc.length, 'Supplier tax invoices attached to bills claiming input VAT', noDoc.length ? noDoc.length + ' bill(s) without an attachment: ' + noDoc.slice(0, 12).map(d => d.no).join(', ') + (noDoc.length > 12 ? '…' : '') : 'All good');
   const drafts = [...S.data.sales, ...S.data.purchases].filter(d => d.status === 'draft' && d.date < today() && d.type !== 'quote' && d.type !== 'po'); add(!drafts.length, 'No old unposted drafts', drafts.length + ' draft documents dated in the past', 'warn');
   const gaps = []; const nums = S.data.sales.filter(d => d.type === 'invoice' && d.no && d.no.startsWith(s.invPrefix || 'INV-')).map(d => parseInt(d.no.slice((s.invPrefix || 'INV-').length), 10)).filter(n => !isNaN(n)).sort((a, b) => a - b); for (let i = 1; i < nums.length; i++) if (nums[i] - nums[i - 1] > 1) gaps.push(nums[i - 1] + 1); add(!gaps.length, 'Tax invoice numbering is sequential without gaps', gaps.length ? 'Missing numbers after: ' + gaps.slice(0, 10).join(', ') : 'All good');
@@ -2327,7 +2331,7 @@ function agingReport(m, side) {
 REPORT_FN.ar = (m) => agingReport(m, 'S'); REPORT_FN.ap = (m) => agingReport(m, 'P');
 function partyReport(m, side) {
   const { from, to } = periodFromParams(); const coll = side === 'S' ? 'sales' : 'purchases'; const by = {};
-  S.data[coll].filter(d => isLive(d) && ['invoice', 'credit', 'bill', 'debit'].includes(d.type) && d.date >= from && d.date <= to).forEach(d => { const c = calcDoc(d, side); const sg = ['credit', 'debit'].includes(d.type) ? -1 : 1; const r = by[d.contactId] || (by[d.contactId] = { name: (contact(d.contactId) || {}).name || '?', n: 0, net: 0, vat: 0, total: 0 }); r.n++; r.net = r2(r.net + sg * c.netA); r.vat = r2(r.vat + sg * (side === 'S' ? c.vatA : c.vatA)); r.total = r2(r.total + sg * c.totalA); });
+  S.data[coll].filter(d => isLive(d) && ['invoice', 'credit', 'bill', 'debit'].includes(d.type) && d.date >= from && d.date <= to).forEach(d => { const c = calcDoc(d, side); const sg = ['credit', 'debit'].includes(d.type) ? -1 : 1; const pk = d.contactId || 'payee:' + ((docParty(d) || {}).name || 'Cash purchase'); const r = by[pk] || (by[pk] = { name: (docParty(d) || {}).name || '?', n: 0, net: 0, vat: 0, total: 0 }); r.n++; r.net = r2(r.net + sg * c.netA); r.vat = r2(r.vat + sg * (side === 'S' ? c.vatA : c.vatA)); r.total = r2(r.total + sg * c.totalA); });
   const rows = Object.values(by).sort((a, b) => b.net - a.net); const tot = rows.reduce((s, r) => s + r.net, 0); rows.forEach(r => r.pct = tot ? r.net / tot * 100 : 0);
   repShell(m, side === 'S' ? 'Sales by customer' : 'Purchases by supplier', periodCtl(from, to), dataTable([{ k: 'name', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'n', l: 'Documents' }, { k: 'net', l: 'Net (AED)', num: 1 }, { k: 'vat', l: 'VAT (AED)', num: 1 }, { k: 'total', l: 'Gross (AED)', num: 1 }, { k: 'pct', l: '% of total', num: 1, fmt: v => v.toFixed(1) + '%' }], rows, { totals: ['net', 'vat', 'total'] }), (side === 'S' ? 'Sales_by_customer_' : 'Purchases_by_supplier_') + to);
 }
