@@ -875,11 +875,23 @@ function accOptions(sel, filter, blank = true) {
 }
 const bankAccs = () => S.data.accounts.filter(a => a.grp === 'cash' && a.active !== false);
 function bankOptions(sel) { return bankAccs().map(a => opt(a.code, a.code + ' · ' + a.name, sel)).join(''); }
-function contactOptions(sel, kind) { return opt('', '— select —', sel) + S.data.contacts.filter(c => c.active !== false && (!kind || (kind === 'C' ? c.isCustomer : c.isSupplier))).sort((a, b) => a.name.localeCompare(b.name)).map(c => opt(c.id, c.name, sel)).join(''); }
-function itemOptions(sel) { return opt('', '— free text —', sel) + S.data.items.filter(i => i.active !== false).sort((a, b) => (a.sku || '').localeCompare(b.sku || '')).map(i => opt(i.id, (i.sku ? i.sku + ' · ' : '') + i.name, sel)).join(''); }
+const NEWOPT = '__new__';
+function contactOptions(sel, kind) { return opt('', '— select —', sel) + opt(NEWOPT, kind === 'S' ? '➕ Add new supplier…' : kind === 'C' ? '➕ Add new customer…' : '➕ Add new contact…', '') + S.data.contacts.filter(c => c.active !== false && (!kind || (kind === 'C' ? c.isCustomer : c.isSupplier))).sort((a, b) => a.name.localeCompare(b.name)).map(c => opt(c.id, c.name, sel)).join(''); }
+function itemOptions(sel, withNew) { return opt('', '— free text —', sel) + (withNew ? opt(NEWOPT, '➕ Add new item…', '') : '') + S.data.items.filter(i => i.active !== false).sort((a, b) => (a.sku || '').localeCompare(b.sku || '')).map(i => opt(i.id, (i.sku ? i.sku + ' · ' : '') + i.name, sel)).join(''); }
 function ccOptions(sel) { return opt('', '—', sel) + S.data.costcenters.map(c => opt(c.id, c.code + ' ' + c.name, sel)).join(''); }
 function curOptions(sel) { return CURRENCIES.map(c => opt(c, c, sel || 'AED')).join(''); }
 function emirateOptions(sel) { return EMIRATES.map(([k, n]) => opt(k, n, sel)).join(''); }
+
+/* Keyboard shortcuts: Ctrl/⌘+S save draft · Ctrl/⌘+Enter post · Esc close dialog · / search */
+document.addEventListener('keydown', (e) => {
+  const mod = e.ctrlKey || e.metaKey; const mw = document.querySelector('.mwrap:last-child');
+  if (e.key === 'Escape' && mw) { mw.remove(); return; }
+  if (mod && e.key === 'Enter') { const b = mw ? mw.querySelector('.mfoot .btn.primary') : document.querySelector('[data-act=post],[data-pa=post],[data-ja=post],[data-pr=post]'); if (b && !b.disabled) { e.preventDefault(); if (document.activeElement) document.activeElement.blur(); setTimeout(() => b.click(), 0); } return; }
+  if (mod && (e.key === 's' || e.key === 'S')) { const b = mw ? mw.querySelector('.mfoot .btn.primary') : document.querySelector('[data-act=save],[data-pa=save],[data-ja=save],[data-pr=save],#vsave,#ctsave,#ss'); if (b) { e.preventDefault(); if (document.activeElement) document.activeElement.blur(); setTimeout(() => b.click(), 0); } return; }
+  if (e.key === '/' && !mw && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) { const g = $('#gsearch'); if (g) { e.preventDefault(); g.focus(); } }
+});
+const lsGet = (k, d) => { try { const v = localStorage.getItem('cc-' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem('cc-' + k, JSON.stringify(v)); } catch (e) { } };
 
 /* field: [key,label,type,opts] */
 function field(f, val) {
@@ -1064,8 +1076,9 @@ function docListPage(m, side) {
     (side === 'S' ? qdPanel() : '') + tabs(Object.entries(T).filter(([k]) => tabKeys.includes(k)).map(([k, v]) => [k, v[0] + 's']), tab) +
     `<div class="kpis sm"><div class="kpi"><span>Documents</span><b>${rows.length}</b></div><div class="kpi"><span>Outstanding (AED)</span><b>${fmt(out)}</b></div><div class="kpi"><span>Overdue (AED)</span><b class="${overdue > 0 ? 'neg' : ''}">${fmt(overdue)}</b></div><div class="kpi"><span>Total value (AED)</span><b>${fmt(rows.filter(r => r.d.status === 'posted').reduce((s, r) => s + r.totalA, 0))}</b></div></div>
     <div class="card"><div class="toolbar"><input id="dq" placeholder="Filter by number, party, reference" value="${esc(VIEW.params.q || '')}"><select id="df">${['all', 'draft', 'unpaid', 'partpaid', 'overdue', 'paid', 'posted', 'void', 'open'].map(x => opt(x, x === 'all' ? 'All statuses' : x === 'partpaid' ? 'Part paid' : x[0].toUpperCase() + x.slice(1), f)).join('')}</select><span class="grow"></span>${exportBar('#docTbl', (side === 'S' ? 'Sales_' : 'Purchases_') + tab)}</div>
-    ${dataTable([{ k: 'no', l: 'Number' }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
+    ${dataTable([{ k: 'no', l: 'Number' }, { k: 'date', l: 'Date', fmt: fmtD }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'party', l: side === 'S' ? 'Customer' : 'Supplier' }, { k: 'ref', l: side === 'S' ? 'Reference' : 'Supplier inv. no.' }, { k: 'cur', l: 'Cur' }, { k: 'net', l: 'Net', num: 1 }, { k: 'vat', l: 'VAT', num: 1 }, { k: 'total', l: 'Total', num: 1 }, { k: 'open', l: 'Balance', num: 1, fmt: (v) => v == null ? '' : fmtS(v) }, { k: 'st', l: 'Status', html: r => badge(r.st[0], r.st[1]) }, { k: 'x', l: '', cls: 'noprint', html: r => r.open > 0.005 ? `<button class="btn sm" data-qpay="${r.d.id}">${side === 'S' ? 'Receive' : 'Pay'}</button>` : '' }], rows, { id: 'docTbl', onRow: r => go(VIEW.page, 'edit', r.d.id), empty: 'No documents. Create your first one with the button above.' })}</div>`;
   $$('[data-tab]', m).forEach(b => b.onclick = () => { VIEW.tab = b.dataset.tab; VIEW.params = {}; render(); });
+  $$('[data-qpay]', m).forEach(b => b.onclick = (e) => { e.stopPropagation(); const d = byId(coll, b.dataset.qpay); go('banking', 'edit', null, { kind: side === 'S' ? 'receipt' : 'payment', contactId: d.contactId, allocate: d.id }); });
   if ($('#newDoc')) $('#newDoc').onclick = () => go(VIEW.page, 'edit', null, { type: tab });
   if ($('#qdSyncNow')) $('#qdSyncNow').onclick = () => { if (!QD.customers || !QD.quotes) { toast('Still connecting to Quote Desk…', 'warn'); return; } qdReconcile(true); };
   $$('[data-qdopen]', m).forEach(a => a.onclick = (e) => { e.preventDefault(); go('sales', 'edit', a.dataset.qdopen); });
@@ -1081,7 +1094,7 @@ PAGES.purchases = (m) => docListPage(m, 'P');
 function blankDoc(side, type, extra) {
   const s = S.settings; const d = { id: uid(), type, no: '', date: today(), status: 'draft', contactId: '', currency: 'AED', rate: 1, lines: [{ qty: 1, price: 0, disc: 0, vat: 'SR', desc: '' }], notes: '' };
   if (side === 'S') { d.supplyDate = ''; d.dueDate = addDays(today(), 30); d.emirate = s.emirate || 'DXB'; d.terms = type === 'quote' ? 'Quotation valid for 30 days.' : s.invTerms; if (type === 'credit') d.returnStock = true; if (type === 'quote') d.dueDate = addDays(today(), 30); }
-  else { d.dueDate = addDays(today(), 30); d.supplierInvNo = ''; if (extra && extra.expense) { d.paidFrom = (bankAccs()[0] || {}).code || '1100'; d.paidDate = today(); d.isExpense = true; } }
+  else { d.dueDate = addDays(today(), 30); d.supplierInvNo = ''; if (extra && extra.expense) { d.paidFrom = lsGet('lastPaidFrom', (bankAccs()[0] || {}).code || '1100'); d.paidDate = today(); d.isExpense = true; } }
   return d;
 }
 function docEditor(m, side) {
@@ -1132,21 +1145,31 @@ function docEditor(m, side) {
   const tb = $('#lines tbody');
   function drawLines() {
     tb.innerHTML = d.lines.map((l, i) => `<tr data-i="${i}">
-      <td><select data-l="itemId">${itemOptions(l.itemId)}</select></td>
+      <td><select data-l="itemId">${itemOptions(l.itemId, !ro)}</select></td>
       <td><input data-l="desc" value="${esc(l.desc)}" placeholder="Description of goods / services"></td>
       <td><input data-l="qty" class="num" value="${esc(l.qty)}"></td>
       <td><input data-l="price" class="num" value="${esc(l.price)}"></td>
       <td><input data-l="disc" class="num" value="${esc(l.disc || '')}"></td>
       <td><select data-l="vat">${Object.entries(codes).map(([k, v]) => opt(k, v.label, l.vat)).join('')}</select></td>
-      <td><select data-l="acc">${accOptions(l.acc, a => side === 'S' ? (a.type === 'I') : (a.type === 'X' || a.type === 'A'), tracksStock(l.itemId) ? (side === 'S' ? 'Item default (revenue)' : 'Inventory (stock item)') : l.itemId && side === 'S' ? 'Item default (revenue)' : '— select account —')}</select></td>
+      <td><select data-l="acc">${accOptions(l.acc, a => side === 'S' ? (a.type === 'I') : (a.type === 'X' || a.type === 'A'), tracksStock(l.itemId) ? (side === 'S' ? 'Item default (revenue)' : 'Inventory (stock item)') : l.itemId && side === 'S' ? 'Item default (revenue)' : '— select account —')}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select></td>
       <td class="n" data-o="net"></td><td class="n" data-o="vat"></td>
       <td>${ro ? '' : `<button class="iconbtn sm" data-del="${i}" title="Remove">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
     if (ro) $$('input,select', tb).forEach(x => x.disabled = true);
+    const applyItem = (i) => { const it = item(d.lines[i].itemId); if (!it) return; const l = d.lines[i]; l.desc = it.name + (it.description ? ' – ' + it.description : ''); l.price = side === 'S' ? (it.price || 0) : (it.cost || 0); l.vat = side === 'S' ? (it.vatS || defaultVat(side)) : (it.vatP || defaultVat(side)); l.acc = it.type === 'goods' && side === 'P' ? '' : (side === 'S' ? it.salesAcc : it.purchAcc) || ''; if (d.rate && num(d.rate) !== 1 && l.price) l.price = r2(num(l.price) / num(d.rate)); };
     $$('[data-l]', tb).forEach(el => el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
-      const i = Number(el.closest('tr').dataset.i); const k = el.dataset.l; d.lines[i][k] = el.value;
-      if (k === 'itemId') { const it = item(el.value); if (it) { const l = d.lines[i]; l.desc = it.name + (it.description ? ' – ' + it.description : ''); l.price = side === 'S' ? (it.price || 0) : (it.cost || 0); l.vat = side === 'S' ? (it.vatS || defaultVat(side)) : (it.vatP || defaultVat(side)); l.acc = it.type === 'goods' && side === 'P' ? '' : (side === 'S' ? it.salesAcc : it.purchAcc) || ''; if (d.rate && num(d.rate) !== 1 && l.price) l.price = r2(num(l.price) / num(d.rate)); drawLines(); return; } }
+      const i = Number(el.closest('tr').dataset.i); const k = el.dataset.l;
+      if (el.value === NEWOPT) {
+        el.value = d.lines[i][k] || '';
+        if (k === 'itemId') itemForm(null, (it) => { d.lines[i].itemId = it.id; applyItem(i); drawLines(); });
+        if (k === 'acc') accForm(null, (a) => { d.lines[i].acc = a.code; drawLines(); }, side === 'S' ? 'rev' : 'admin');
+        return;
+      }
+      d.lines[i][k] = el.value;
+      if (k === 'itemId' && item(el.value)) { applyItem(i); drawLines(); return; }
       calcShow();
     }));
+    // Enter on the last row adds a new line; Enter elsewhere moves to the next row
+    $$('input[data-l]', tb).forEach(el => el.addEventListener('keydown', (e) => { if (e.key !== 'Enter' || e.ctrlKey || e.metaKey) return; e.preventDefault(); const tr = el.closest('tr'); const i = Number(tr.dataset.i); if (i === d.lines.length - 1) { const prev = d.lines[i]; d.lines.push({ qty: 1, price: 0, disc: 0, vat: prev.vat || defaultVat(side), acc: side === 'P' && !prev.itemId ? prev.acc : '', cc: prev.cc, desc: '' }); drawLines(); const nr = $$('tr[data-i]', tb)[i + 1]; if (nr) $('[data-l="desc"]', nr).focus(); } else { const nr = $$('tr[data-i]', tb)[i + 1]; const t = nr && $(`[data-l="${el.dataset.l}"]`, nr); if (t) t.focus(); } }));
     $$('[data-del]', tb).forEach(b => b.onclick = () => { d.lines.splice(Number(b.dataset.del), 1); if (!d.lines.length) d.lines.push({ qty: 1, price: 0, vat: defaultVat(side) }); drawLines(); });
     calcShow();
   }
@@ -1165,14 +1188,27 @@ function docEditor(m, side) {
   drawLines();
   const form = $('.docform');
   $$('.docform > .grid4 [data-k], .docbottom [data-k]').forEach(el => { if (ro && !['notes'].includes(el.dataset.k)) el.disabled = true; el.addEventListener('change', () => {
-    const k = el.dataset.k; d[k] = el.type === 'checkbox' ? el.checked : el.value;
-    if (k === 'contactId') { const c = contact(d.contactId); if (c) { d.currency = c.currency || 'AED'; d.rate = rateFor(d.currency, d.date); if (side === 'S' && c.emirate) d.emirate = c.emirate; d.dueDate = addDays(d.date, num(c.terms ?? 30)); d.lines.forEach(l => { if (!l.itemId && (!l.desc)) l.vat = defaultVat(side); }); } saveDraftState(); docEditor(m, side); return; }
+    const k = el.dataset.k;
+    if (k === 'contactId' && el.value === NEWOPT) { el.value = d.contactId || ''; contactForm(null, (c) => { d.contactId = c.id; applyContact(c); saveDraftState(); docEditor(m, side); }, side === 'S' ? 'C' : 'S'); return; }
+    d[k] = el.type === 'checkbox' ? el.checked : el.value;
+    if (k === 'dueDate') d._dueManual = true;
+    if (k === 'date') { const c = contact(d.contactId); if (!d._dueManual) { d.dueDate = addDays(d.date, num(c ? (c.terms ?? 30) : 30)); const f = $('#f_dueDate'); if (f) f.value = d.dueDate; } if ((d.currency || 'AED') !== 'AED') { d.rate = rateFor(d.currency, d.date); const f = $('#f_rate'); if (f) f.value = d.rate; calcShow(); } if (d.paidFrom && !d._paidManual) { d.paidDate = d.date; const f = $('#f_paidDate'); if (f) f.value = d.date; } return; }
+    if (k === 'paidDate') d._paidManual = true;
+    if (k === 'contactId') { const c = contact(d.contactId); if (c) applyContact(c); saveDraftState(); docEditor(m, side); return; }
     if (k === 'currency') { d.rate = rateFor(d.currency, d.date); saveDraftState(); docEditor(m, side); return; }
     if (k === 'paidFrom') { if (d.paidFrom && !d.paidDate) d.paidDate = d.date; saveDraftState(); docEditor(m, side); return; }
     if (k === 'againstId' && d.againstId && d.lines.length === 1 && !num(d.lines[0].price)) { const src = byId(coll, d.againstId); if (src) { d.lines = JSON.parse(JSON.stringify(src.lines)); d.currency = src.currency; d.rate = src.rate; d.emirate = src.emirate; saveDraftState(); docEditor(m, side); return; } }
     if (k === 'rate') calcShow();
   }); });
   function saveDraftState() { if (isNew) VIEW.params._draft = d; else VIEW.params._edit = d; }
+  // Customer / supplier defaults, plus memory of how this supplier's last bill was coded
+  function applyContact(c) {
+    d.currency = c.currency || 'AED'; d.rate = rateFor(d.currency, d.date); if (side === 'S' && c.emirate) d.emirate = c.emirate; if (!d._dueManual) d.dueDate = addDays(d.date, num(c.terms ?? 30));
+    const blank = d.lines.every(l => !l.itemId && !l.desc && !num(l.price));
+    const last = side === 'P' ? S.data.purchases.filter(x => x.contactId === c.id && x.status === 'posted' && ['bill'].includes(x.type)).sort((a, b) => b.date.localeCompare(a.date))[0] : null;
+    if (blank && last) { const lt = last.lines.filter(l => !l.itemId); if (lt.length) d.lines = lt.map(l => ({ desc: l.desc, qty: 1, price: 0, disc: 0, vat: l.vat, acc: l.acc, cc: l.cc })); if (d.type === 'bill' && d.isExpense && last.paidFrom) d.paidFrom = last.paidFrom; toast('Lines pre-filled from ' + last.no + ' – enter this bill\u2019s amounts'); }
+    else d.lines.forEach(l => { if (!l.itemId && !l.desc) l.vat = defaultVat(side); });
+  }
   $('#back').onclick = () => go(VIEW.page);
   if ($('#addLine')) $('#addLine').onclick = () => { d.lines.push({ qty: 1, price: 0, disc: 0, vat: defaultVat(side), desc: '' }); drawLines(); };
   bindDocActions(d, side, isNew, coll);
@@ -1186,9 +1222,9 @@ function docActions(d, side, isNew) {
     return b.join('');
   }
   if (d.status === 'draft') {
-    b.push('<button class="btn" data-act="save">Save draft</button>');
+    b.push('<button class="btn" data-act="save" title="Ctrl/⌘ + S">Save draft</button>');
     if (d.type === 'quote' || d.type === 'po') b.push(`<button class="btn primary" data-act="post">${d.type === 'quote' ? 'Issue quotation' : 'Issue purchase order'}</button>`);
-    else b.push(`<button class="btn primary" data-act="post">Approve & post${side === 'S' ? ' (issue)' : ''}</button>`);
+    else b.push(`<button class="btn primary" data-act="post" title="Ctrl/⌘ + Enter">Approve & post${side === 'S' ? ' (issue)' : ''}</button><button class="btn" data-act="postnew">Post & new</button>`);
     if (!isNew) b.push('<button class="btn danger ghost" data-act="delete">Delete draft</button>');
   } else if (d.status === 'posted') {
     if (['invoice', 'bill'].includes(d.type) && openAmount(d) > 0.005) b.push(`<button class="btn primary" data-act="pay">${side === 'S' ? 'Record receipt' : 'Record payment'}</button>`);
@@ -1237,10 +1273,11 @@ function bindDocActions(d0, side, isNew, coll) {
   const getD = () => { const d = JSON.parse(JSON.stringify(d0)); $$('.docform > .grid4 [data-k], .docbottom [data-k]').forEach(el => { d[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value.trim(); }); $$('#lines tbody tr[data-i]').forEach((tr, i) => { $$('[data-l]', tr).forEach(el => d.lines[i][el.dataset.l] = el.value); }); d.rate = num(d.rate) || 1; return d; };
   $$('[data-act]').forEach(b => b.onclick = async () => {
     const act = b.dataset.act; const d = getD(); const T = DOCTYPES[side][d.type];
+    if ((act === 'post' || act === 'postnew' || act === 'save') && d.paidFrom) lsSet('lastPaidFrom', d.paidFrom);
     if (act === 'save') { const v = validateDoc(d, side, false); if (!d.contactId) { toast(v.errs[0], 'err'); return; } d.status = 'draft'; d._total = v.c.total; await store.save(coll, d); VIEW.params._draft = null; toast('Draft saved'); go(VIEW.page, 'edit', d.id); }
-    if (act === 'post') {
+    if (act === 'post' || act === 'postnew') {
       const v = validateDoc(d, side, true); if (v.errs.length) { modal('Cannot post', '<ul class="errs">' + v.errs.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>', [{ label: 'OK', cls: 'primary' }]); return; }
-      const doPost = async () => { if (!d.no) d.no = nextNumber(T[1]); d.status = 'posted'; d.postedAt = new Date().toISOString(); d._total = v.c.total; await store.save(coll, d, 'post'); VIEW.params._draft = null; toast(T[0] + ' ' + d.no + ' posted'); go(VIEW.page, 'edit', d.id); };
+      const doPost = async () => { if (!d.no) d.no = nextNumber(T[1]); d.status = 'posted'; d.postedAt = new Date().toISOString(); d._total = v.c.total; delete d._dueManual; delete d._paidManual; await store.save(coll, d, 'post'); VIEW.params._draft = null; toast(T[0] + ' ' + d.no + ' posted'); if (act === 'postnew') go(VIEW.page, 'edit', null, { type: d.type, expense: d.isExpense }); else go(VIEW.page, 'edit', d.id); };
       if (v.warns.length) modal('Check before posting', '<ul class="warns">' + v.warns.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>', [{ label: 'Go back' }, { label: 'Post anyway', cls: 'primary', onClick: doPost }]); else await doPost();
     }
     if (act === 'delete') confirmBox('Delete this draft? This cannot be undone.', async () => { await store.remove(coll, d.id); toast('Draft deleted'); go(VIEW.page); }, 'Delete', true);
@@ -1388,7 +1425,7 @@ function pdcAction(id, field) {
 function payEditor(m) {
   let p = VIEW.id ? byId('payments', VIEW.id) : null; const isNew = !p;
   if (p && VIEW.params._draft && VIEW.params._draft.id === p.id && p.status === 'draft') p = VIEW.params._draft;
-  if (!p) p = VIEW.params._draft || (VIEW.params._draft = { id: uid(), kind: VIEW.params.kind || 'receipt', no: '', date: VIEW.params.date || today(), status: 'draft', contactId: VIEW.params.contactId || '', bankAcc: (bankAccs()[1] || bankAccs()[0] || {}).code, method: 'bank', amount: VIEW.params.amount || '', currency: 'AED', rate: 1, allocations: [], memo: VIEW.params.memo || '', charges: '' });
+  if (!p) p = VIEW.params._draft || (VIEW.params._draft = { id: uid(), kind: VIEW.params.kind || 'receipt', no: '', date: VIEW.params.date || today(), status: 'draft', contactId: VIEW.params.contactId || '', bankAcc: lsGet('lastBank-' + (VIEW.params.kind || 'receipt'), (bankAccs()[1] || bankAccs()[0] || {}).code), method: 'bank', amount: VIEW.params.amount || '', currency: 'AED', rate: 1, allocations: [], memo: VIEW.params.memo || '', charges: '' });
   p = JSON.parse(JSON.stringify(p)); const ro = p.status !== 'draft';
   const isT = p.kind === 'transfer', isR = p.kind === 'receipt';
   const title = isT ? 'Bank transfer' : isR ? 'Receipt voucher' : 'Payment voucher';
@@ -1400,7 +1437,7 @@ function payEditor(m) {
     ${field(['no', 'Voucher no.', 'text', { help: 'Auto-numbered on posting if blank' }], p.no)}
     ${field(['date', 'Date', 'date', { req: 1 }], p.date)}
     ${isT ? field(['bankAcc', 'From account', 'select', { options: bankOptions }], p.bankAcc) + field(['toAcc', 'To account', 'select', { options: (v) => opt('', '— select —', v) + bankOptions(v) }], p.toAcc) :
-      field(['contactId', isR ? 'Received from (customer)' : 'Paid to (supplier)', 'select', { options: (v) => opt('', '— none: post directly to an account —', v) + S.data.contacts.filter(c => c.active !== false).sort((a, b) => a.name.localeCompare(b.name)).map(c => opt(c.id, c.name + (c.isCustomer && c.isSupplier ? '' : c.isCustomer ? ' (customer)' : ' (supplier)'), v)).join('') }], p.contactId) +
+      field(['contactId', isR ? 'Received from (customer)' : 'Paid to (supplier)', 'select', { options: (v) => opt('', '— none: post directly to an account —', v) + opt(NEWOPT, isR ? '➕ Add new customer…' : '➕ Add new supplier…', '') + S.data.contacts.filter(c => c.active !== false).sort((a, b) => a.name.localeCompare(b.name)).map(c => opt(c.id, c.name + (c.isCustomer && c.isSupplier ? '' : c.isCustomer ? ' (customer)' : ' (supplier)'), v)).join('') }], p.contactId) +
       field(['bankAcc', isR ? 'Deposited to' : 'Paid from', 'select', { options: bankOptions }], p.bankAcc)}
     ${!isT ? field(['method', 'Method', 'select', { options: [['bank', 'Bank transfer'], ['cash', 'Cash'], ['cheque', 'Cheque (current-dated)'], ['pdc', 'Post-dated cheque (PDC)'], ['card', 'Card / payment gateway']] }], p.method) : ''}
     ${!isT && (p.method === 'cheque' || p.method === 'pdc') ? field(['chequeNo', 'Cheque no.', 'text'], p.chequeNo) + field(['chequeDate', 'Cheque date', 'date'], p.chequeDate) + field(['chequeBank', 'Drawn on (bank)', 'text'], p.chequeBank) : ''}
@@ -1409,24 +1446,27 @@ function payEditor(m) {
     ${field(['rate', 'Rate to AED', 'money'], p.rate)}
     ${isT ? field(['toAmount', 'Amount received (if different currency)', 'money'], p.toAmount) + field(['toRate', 'Rate of receiving account', 'money'], p.toRate) : ''}
     ${field(['charges', 'Bank charges (AED)', 'money'], p.charges)}
-    ${!isT && !p.contactId ? field(['acc', 'Offset account', 'select', { options: (v) => accOptions(v, a => a.grp !== 'cash'), help: 'e.g. Share capital, Due to shareholder, Bank loan, Other income' }], p.acc) : ''}
+    ${!isT && !p.contactId ? field(['acc', 'Offset account', 'select', { options: (v) => accOptions(v, a => a.grp !== 'cash') + opt(NEWOPT, '➕ Add new account…', ''), help: 'e.g. Share capital, Due to shareholder, Bank loan, Other income' }], p.acc) : ''}
     ${field(['memo', 'Memo / narration', 'text', { wide: 1 }], p.memo)}
     </div>
     ${p.contactId && !isT ? `<h3>Allocate to ${isR ? 'invoices' : 'bills'}</h3><div class="tblwrap"><table class="tbl" id="alloc"><thead><tr><th>Document</th><th>Date</th><th>Due</th><th>Cur</th><th class="n">Open</th><th class="n" style="width:170px">Allocate (invoice currency)</th></tr></thead><tbody>
       ${openDocs.length ? openDocs.map(x => { const a = (p.allocations || []).find(a => a.docId === x.d.id); return `<tr><td>${esc(x.d.no)}</td><td>${fmtD(x.d.date)}</td><td>${fmtD(x.d.dueDate)}</td><td>${x.d.currency || 'AED'}</td><td class="n">${fmt(x.o)}</td><td class="n"><input class="num" data-alloc="${x.d.id}" value="${a ? a.amount : ''}" ${ro ? 'disabled' : ''}>${(x.d.currency || 'AED') !== (p.currency || 'AED') ? `<div class="small muted">= ${esc(p.currency || 'AED')} <input class="num sm" data-allocp="${x.d.id}" value="${a && a.payAmount != null ? a.payAmount : ''}" ${ro ? 'disabled' : ''} title="Amount of this ${isR ? 'receipt' : 'payment'} used"></div>` : ''}</td></tr>`; }).join('') : '<tr><td colspan="6" class="empty">No open documents – the amount will be held on account.</td></tr>'}
       </tbody></table></div>${!ro && openDocs.length ? '<button class="btn sm" id="autoAlloc">Auto-allocate oldest first</button>' : ''}<div id="allocSum" class="muted"></div>` : ''}
     ${p.bouncedDate ? `<div class="alert err">Cheque returned unpaid on ${fmtD(p.bouncedDate)}.</div>` : ''}
-    <div class="docact">${ro ? (p.status === 'posted' ? `<button class="btn" data-pa="pdf">${FB ? "Print / save PDF" : "Voucher PDF"}</button>${p.method === 'pdc' && !p.clearedDate && !p.bouncedDate ? '<button class="btn" data-pa="clr">Mark cleared</button><button class="btn" data-pa="bnc">Mark returned</button>' : ''}${p.contactId && p.kind !== 'transfer' && !p.bouncedDate ? '<button class="btn primary" data-pa="alloc">Allocate to ' + (isR ? 'invoices' : 'bills') + '</button>' : ''}<button class="btn" data-pa="unpost">Revert to draft</button><button class="btn danger ghost" data-pa="void">Void</button>` : '') : `<button class="btn" data-pa="save">Save draft</button><button class="btn primary" data-pa="post">Post</button>${!isNew ? '<button class="btn danger ghost" data-pa="delete">Delete draft</button>' : ''}`}</div></div>`;
+    <div class="docact">${ro ? (p.status === 'posted' ? `<button class="btn" data-pa="pdf">${FB ? "Print / save PDF" : "Voucher PDF"}</button>${p.method === 'pdc' && !p.clearedDate && !p.bouncedDate ? '<button class="btn" data-pa="clr">Mark cleared</button><button class="btn" data-pa="bnc">Mark returned</button>' : ''}${p.contactId && p.kind !== 'transfer' && !p.bouncedDate ? '<button class="btn primary" data-pa="alloc">Allocate to ' + (isR ? 'invoices' : 'bills') + '</button>' : ''}<button class="btn" data-pa="unpost">Revert to draft</button><button class="btn danger ghost" data-pa="void">Void</button>` : '') : `<button class="btn" data-pa="save" title="Ctrl/⌘ + S">Save draft</button><button class="btn primary" data-pa="post" title="Ctrl/⌘ + Enter">Post</button><button class="btn" data-pa="postnew">Post & new</button>${!isNew ? '<button class="btn danger ghost" data-pa="delete">Delete draft</button>' : ''}`}</div></div>`;
   if (ro) $$('.payform [data-k]').forEach(x => x.disabled = true);
   const read = () => { const o = JSON.parse(JSON.stringify(p)); $$('.payform [data-k]').forEach(el => o[el.dataset.k] = el.value.trim()); o.allocations = $$('[data-alloc]').map(i => { const d = byId(isR ? 'sales' : 'purchases', i.dataset.alloc); const amt = r2(num(i.value)); const pi = $(`[data-allocp="${i.dataset.alloc}"]`); const al = { docId: i.dataset.alloc, amount: amt }; if (pi) al.payAmount = pi.value.trim() !== '' ? r2(num(pi.value)) : docToPay(amt, d.currency, o.currency, o.date, o.rate); return al; }).filter(a => a.amount > 0); o.rate = num(o.rate) || 1; o.amount = r2(num(o.amount)); return o; };
   const sumA = () => { const o = read(); const s = r2(o.allocations.reduce((a, b) => a + payAmt(b), 0)); const el = $('#allocSum'); if (el) el.innerHTML = `Allocated ${fmt(s)} · On account ${fmt(o.amount - s)}` + (s > o.amount + 0.005 ? ' <b class="neg">– allocations exceed amount</b>' : ''); };
   $$('[data-alloc]').forEach(i => i.oninput = () => { const pi = $(`[data-allocp="${i.dataset.alloc}"]`); if (pi) { const o = read(); const d = byId(isR ? 'sales' : 'purchases', i.dataset.alloc); pi.value = num(i.value) ? docToPay(num(i.value), d.currency, o.currency, o.date, o.rate) : ''; } sumA(); }); $$('[data-allocp]').forEach(i => i.oninput = sumA); sumA();
-  $$('.payform [data-k]').forEach(el => el.addEventListener('change', () => { const k = el.dataset.k; if (['kind', 'contactId', 'method', 'currency'].includes(k)) { const o = read(); if (k === 'currency') o.rate = rateFor(o.currency, o.date); if (k === 'contactId') { o.allocations = []; const c = contact(o.contactId); if (c && c.currency) { o.currency = c.currency; o.rate = rateFor(c.currency, o.date); } } VIEW.params._draft = o; payEditor(m); } }));
+  $$('.payform [data-k]').forEach(el => el.addEventListener('change', () => { const k = el.dataset.k;
+    if (k === 'contactId' && el.value === NEWOPT) { el.value = p.contactId || ''; const o0 = read(); contactForm(null, (c) => { o0.contactId = c.id; o0.allocations = []; if (c.currency) { o0.currency = c.currency; o0.rate = rateFor(c.currency, o0.date); } VIEW.params._draft = o0; payEditor(m); }, isR ? 'C' : 'S'); return; }
+    if (k === 'acc' && el.value === NEWOPT) { el.value = p.acc || ''; const o0 = read(); accForm(null, (a) => { o0.acc = a.code; VIEW.params._draft = o0; payEditor(m); }, isR ? 'othinc' : 'admin'); return; } if (['kind', 'contactId', 'method', 'currency'].includes(k)) { const o = read(); if (k === 'currency') o.rate = rateFor(o.currency, o.date); if (k === 'contactId') { o.allocations = []; const c = contact(o.contactId); if (c && c.currency) { o.currency = c.currency; o.rate = rateFor(c.currency, o.date); } } VIEW.params._draft = o; payEditor(m); } }));
   if ($('#autoAlloc')) $('#autoAlloc').onclick = () => { let left = num($('#f_amount').value); const ins = $$('[data-alloc]'); if (!left) { left = r2(openDocs.reduce((s, x) => s + docToPay(x.o, x.d.currency, $('#f_currency').value, $('#f_date').value, $('#f_rate').value), 0)); $('#f_amount').value = left; } const pc = $('#f_currency').value, pr = num($('#f_rate').value) || 1, pd = $('#f_date').value; openDocs.sort((a, b) => (a.d.dueDate || a.d.date).localeCompare(b.d.dueDate || b.d.date)).forEach(x => { const inp = ins.find(i => i.dataset.alloc === x.d.id); const pi = $(`[data-allocp="${x.d.id}"]`); const canDoc = payToDoc(left, x.d.currency, pc, pd, pr); const a = r2(Math.min(canDoc, x.o)); inp.value = a > 0.004 ? a : ''; const used = a > 0.004 ? (a === x.o && canDoc >= x.o ? docToPay(a, x.d.currency, pc, pd, pr) : (r2(canDoc) === a ? left : docToPay(a, x.d.currency, pc, pd, pr))) : 0; if (pi) pi.value = used ? r2(used) : ''; left = r2(left - used); }); sumA(); };
   $('#back').onclick = () => go('banking');
   $$('[data-pa]').forEach(b => b.onclick = async () => {
     const a = b.dataset.pa; const o = read();
-    if (a === 'save' || a === 'post') {
+    const postNew = a === 'postnew'; const a2 = postNew ? 'post' : a;
+    if (a2 === 'save' || a2 === 'post') { const a = a2;
       const errs = [];
       if (!o.date) errs.push('Date required'); if (!(o.amount > 0)) errs.push('Amount must be positive'); if (!o.bankAcc) errs.push('Bank / cash account required');
       if (isT && (!o.toAcc || o.toAcc === o.bankAcc)) errs.push('Choose a different destination account');
@@ -1438,7 +1478,7 @@ function payEditor(m) {
       if (o.no && S.data.payments.find(x => x.id !== o.id && x.no === o.no)) errs.push('Voucher number already used');
       if (errs.length && (a === 'post' || errs[0] !== 'Date required')) { modal('Please fix', '<ul class="errs">' + errs.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>', [{ label: 'OK', cls: 'primary' }]); return; }
       if (a === 'post') { if (!o.no) o.no = nextNumber(o.kind === 'receipt' ? 'rc' : 'pv'); o.status = 'posted'; } else o.status = 'draft';
-      delete o._autoDone; await store.save('payments', o, a === 'post' ? 'post' : undefined); VIEW.params._draft = null; toast(a === 'post' ? 'Posted ' + o.no : 'Saved'); go('banking', 'edit', o.id);
+      delete o._autoDone; if (o.bankAcc && o.kind !== 'transfer') lsSet('lastBank-' + o.kind, o.bankAcc); await store.save('payments', o, a === 'post' ? 'post' : undefined); VIEW.params._draft = null; toast(a === 'post' ? 'Posted ' + o.no : 'Saved'); if (postNew) go('banking', 'edit', null, { kind: o.kind }); else go('banking', 'edit', o.id);
     }
     if (a === 'delete') confirmBox('Delete this draft?', async () => { await store.remove('payments', p.id); go('banking'); }, 'Delete', true);
     if (a === 'void') { if (!assertOpen(p.date)) return; confirmBox('Void ' + p.no + '? Allocations are released and the entry leaves the ledger.', async () => { const x = byId('payments', p.id); x.status = 'void'; await store.save('payments', x, 'void'); render(); }, 'Void', true); }
@@ -1547,9 +1587,10 @@ const CONTACT_FIELDS = [
   ['defaultVat', 'Default VAT treatment', 'select', { options: [['', 'Auto (by country)'], ['SR', 'SR 5%'], ['ZR', 'ZR 0%'], ['EX', 'Exempt'], ['OS', 'Out of scope'], ['RC', 'Reverse charge (purchases)'], ['IM', 'Import via customs (purchases)']] }],
   ['related', 'Related party / connected person (CT transfer pricing)', 'check'], ['licence', 'Trade licence no.', 'text'], ['notes', 'Notes', 'textarea', { wide: 1, rows: 2 }]
 ];
-function contactForm(c, onDone) {
-  c = c ? JSON.parse(JSON.stringify(c)) : { id: uid(), isCustomer: VIEW.tab !== 'S', isSupplier: VIEW.tab === 'S', country: 'AE', emirate: 'DXB', currency: 'AED', terms: 30, location: 'mainland', active: true };
-  modal(c.name ? 'Edit ' + c.name : 'New contact', `<div class="grid3">${CONTACT_FIELDS.map(f => field(f, c[f[0]])).join('')}${field(['active', 'Active', 'check'], c.active !== false)}</div>`, [{ label: 'Cancel' }, {
+function contactForm(c, onDone, kind) {
+  const isSup = kind ? kind === 'S' : VIEW.tab === 'S';
+  c = c ? JSON.parse(JSON.stringify(c)) : { id: uid(), isCustomer: !isSup, isSupplier: isSup, country: 'AE', emirate: 'DXB', currency: 'AED', terms: 30, location: 'mainland', active: true };
+  modal(c.name ? 'Edit ' + c.name : (kind === 'S' ? 'New supplier' : kind === 'C' ? 'New customer' : 'New contact'), `<div class="grid3">${CONTACT_FIELDS.map(f => field(f, c[f[0]])).join('')}${field(['active', 'Active', 'check'], c.active !== false)}</div>`, [{ label: 'Cancel' }, {
     label: 'Save', cls: 'primary', onClick: async (w) => {
       const o = { ...c, ...readFields(w) }; if (!o.name) { toast('Name required', 'err'); return false; }
       if (o.trn && !/^\d{15}$/.test(o.trn)) { toast('TRN must be 15 digits', 'err'); return false; }
@@ -1605,9 +1646,9 @@ const ITEM_FIELDS = [
   ['salesAcc', 'Revenue account', 'select', { options: (v) => accOptions(v, a => a.type === 'I') }], ['purchAcc', 'Expense account (services)', 'select', { options: (v) => accOptions(v, a => a.type === 'X') }],
   ['description', 'Description', 'textarea', { wide: 1, rows: 2 }]
 ];
-function itemForm(it) {
+function itemForm(it, onDone) {
   it = it ? JSON.parse(JSON.stringify(it)) : { id: uid(), type: 'goods', unit: 'pcs', vatS: 'SR', vatP: 'SR', salesAcc: '4100', active: true };
-  modal(it.name ? 'Edit ' + it.name : 'New item', `<div class="grid3">${ITEM_FIELDS.map(f => field(f, it[f[0]])).join('')}${field(['active', 'Active', 'check'], it.active !== false)}</div>`, [{ label: 'Cancel' }, { label: 'Save', cls: 'primary', onClick: async (w) => { const o = { ...it, ...readFields(w) }; if (!o.sku || !o.name) { toast('SKU and name required', 'err'); return false; } if (S.data.items.find(x => x.id !== o.id && x.sku === o.sku)) { toast('SKU already exists', 'err'); return false; } o.price = num(o.price); o.cost = num(o.cost); o.reorder = num(o.reorder); await store.save('items', o); render(); } }], { wide: true });
+  modal(it.name ? 'Edit ' + it.name : 'New item', `<div class="grid3">${ITEM_FIELDS.map(f => field(f, it[f[0]])).join('')}${field(['active', 'Active', 'check'], it.active !== false)}</div>`, [{ label: 'Cancel' }, { label: 'Save', cls: 'primary', onClick: async (w) => { const o = { ...it, ...readFields(w) }; if (!o.sku || !o.name) { toast('SKU and name required', 'err'); return false; } if (S.data.items.find(x => x.id !== o.id && x.sku === o.sku)) { toast('SKU already exists', 'err'); return false; } o.price = num(o.price); o.cost = num(o.cost); o.reorder = num(o.reorder); await store.save('items', o); toast('Item saved'); onDone ? onDone(o) : render(); } }], { wide: true });
 }
 PAGES.inventory = (m) => {
   if (VIEW.sub === 'item') return itemView(m);
@@ -1668,10 +1709,13 @@ function journalEditor(m) {
     <div class="docact">${ro ? (j.status === 'posted' ? '<button class="btn" data-ja="copy">Copy to next month (recurring)</button><button class="btn" data-ja="reverse">Create reversing journal</button><button class="btn" data-ja="unpost">Revert to draft</button><button class="btn danger ghost" data-ja="void">Void</button>' : '') : `<button class="btn" data-ja="save">Save draft</button><button class="btn primary" data-ja="post">Post</button>${!isNew ? '<button class="btn danger ghost" data-ja="delete">Delete</button>' : ''}`}</div></div>`;
   const tb = $('#jl');
   const draw = () => {
-    tb.innerHTML = j.lines.map((l, i) => `<tr data-i="${i}"><td><select data-l="acc">${accOptions(l.acc)}</select></td><td><input data-l="desc" value="${esc(l.desc || '')}"></td><td><select data-l="contactId">${opt('', '—', l.contactId)}${S.data.contacts.map(c => opt(c.id, c.name, l.contactId)).join('')}</select></td>${S.data.costcenters.length ? `<td><select data-l="cc">${ccOptions(l.cc)}</select></td>` : ''}<td><input class="num" data-l="dr" value="${esc(l.dr || '')}"></td><td><input class="num" data-l="cr" value="${esc(l.cr || '')}"></td><td>${ro ? '' : `<button class="iconbtn sm" data-del="${i}">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
+    tb.innerHTML = j.lines.map((l, i) => `<tr data-i="${i}"><td><select data-l="acc">${accOptions(l.acc)}${ro ? '' : opt(NEWOPT, '➕ Add new account…', '')}</select></td><td><input data-l="desc" value="${esc(l.desc || '')}"></td><td><select data-l="contactId">${opt('', '—', l.contactId)}${ro ? '' : opt(NEWOPT, '➕ Add new contact…', '')}${S.data.contacts.map(c => opt(c.id, c.name, l.contactId)).join('')}</select></td>${S.data.costcenters.length ? `<td><select data-l="cc">${ccOptions(l.cc)}</select></td>` : ''}<td><input class="num" data-l="dr" value="${esc(l.dr || '')}"></td><td><input class="num" data-l="cr" value="${esc(l.cr || '')}"></td><td>${ro ? '' : `<button class="iconbtn sm" data-del="${i}">${ico('M6 6l12 12M18 6L6 18', 14)}</button>`}</td></tr>`).join('');
     if (ro) $$('input,select', $('.jform')).forEach(x => x.disabled = true);
-    $$('[data-l]', tb).forEach(el => el.addEventListener('input', () => { j.lines[Number(el.closest('tr').dataset.i)][el.dataset.l] = el.value; tot(); }));
-    $$('[data-l]', tb).forEach(el => el.addEventListener('change', () => { j.lines[Number(el.closest('tr').dataset.i)][el.dataset.l] = el.value; tot(); }));
+    $$('[data-l]', tb).forEach(el => el.addEventListener('input', () => { if (el.value === NEWOPT) return; j.lines[Number(el.closest('tr').dataset.i)][el.dataset.l] = el.value; tot(); }));
+    $$('[data-l]', tb).forEach(el => el.addEventListener('change', () => { const i = Number(el.closest('tr').dataset.i); const k = el.dataset.l;
+      if (el.value === NEWOPT) { el.value = j.lines[i][k] || ''; if (k === 'acc') accForm(null, (a) => { j.lines[i].acc = a.code; draw(); }); if (k === 'contactId') contactForm(null, (c) => { j.lines[i].contactId = c.id; draw(); }); return; }
+      j.lines[i][k] = el.value; tot(); }));
+    $$('input[data-l]', tb).forEach(el => el.addEventListener('keydown', (e) => { if (e.key !== 'Enter' || e.ctrlKey || e.metaKey) return; e.preventDefault(); const i = Number(el.closest('tr').dataset.i); if (i === j.lines.length - 1) { const dr = r2(j.lines.reduce((s, l) => s + num(l.dr), 0)), cr = r2(j.lines.reduce((s, l) => s + num(l.cr), 0)); j.lines.push({ acc: '', dr: cr > dr ? r2(cr - dr) : '', cr: dr > cr ? r2(dr - cr) : '', desc: j.lines[i].desc || '' }); draw(); const nr = $$('tr[data-i]', tb)[i + 1]; if (nr) $('[data-l="acc"]', nr).focus(); } }));
     $$('[data-del]', tb).forEach(b => b.onclick = () => { j.lines.splice(Number(b.dataset.del), 1); draw(); });
     tot();
   };
@@ -2300,8 +2344,8 @@ PAGES['chart-of-accounts'] = (m) => {
   }
   bindExports(m);
 };
-function accForm(a) {
-  const isNew = !a; a = a ? { ...a } : { code: '', name: '', grp: 'admin', active: true, cur: 'AED' };
+function accForm(a, onDone, grp) {
+  const isNew = !a; a = a ? { ...a } : { code: suggestCode(grp || 'admin'), name: '', grp: grp || 'admin', active: true, cur: 'AED' };
   const used = !isNew && L().lines.some(l => l.acc === a.code);
   modal(isNew ? 'New account' : a.code + ' · ' + a.name, `<div class="grid2">${field(['code', 'Code', 'text', { req: 1, help: isNew ? 'Numbering: 1xxx assets, 2xxx liabilities, 3xxx equity, 4xxx income, 5xxx cost of sales, 6xxx expenses, 7xxx finance, 8xxx tax' : 'Code cannot be changed' }], a.code)}${field(['name', 'Name', 'text', { req: 1 }], a.name)}
   ${field(['grp', 'Financial statement line (IFRS for SMEs)', 'select', { options: Object.entries(GROUPS).map(([k, v]) => [k, { A: 'Asset', L: 'Liability', E: 'Equity', I: 'Income', X: 'Expense' }[v[0]] + ' · ' + v[1]]) }], a.grp)}
@@ -2312,10 +2356,11 @@ function accForm(a) {
       const o = { ...a, ...readFields(w) }; if (!isNew) o.code = a.code; if (!/^\d{3,6}$/.test(o.code) || !o.name) { toast('Numeric code (3–6 digits) and name required', 'err'); return false; }
       if (isNew && acc(o.code)) { toast('Code already exists', 'err'); return false; }
       if (used && GROUPS[o.grp][0] !== GROUPS[a.grp][0]) { toast('Account has transactions – the type (asset/liability/…) cannot change', 'err'); return false; }
-      o.id = o.code; o.type = GROUPS[o.grp][0]; o.bank = o.grp === 'cash'; await store.save('accounts', o); render();
+      o.id = o.code; o.type = GROUPS[o.grp][0]; o.bank = o.grp === 'cash'; await store.save('accounts', o); toast('Account saved'); onDone ? onDone(o) : render();
     }
   }]);
 }
+function suggestCode(grp) { const same = S.data.accounts.filter(a => a.grp === grp).map(a => parseInt(a.code, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b); if (!same.length) return ''; let c = same[same.length - 1] + 1; while (acc(String(c))) c++; return String(c); }
 function ccForm(c) {
   c = c ? { ...c } : { id: uid(), code: '', name: '' };
   modal('Cost centre', `<div class="grid2">${field(['code', 'Code', 'text', { req: 1 }], c.code)}${field(['name', 'Name', 'text', { req: 1 }], c.name)}${field(['desc', 'Description', 'text', { wide: 1 }], c.desc)}</div>`, [{ label: 'Cancel' }, { label: 'Save', cls: 'primary', onClick: async (w) => { const o = { ...c, ...readFields(w) }; if (!o.code || !o.name) return false; await store.save('costcenters', o); render(); } }]);
