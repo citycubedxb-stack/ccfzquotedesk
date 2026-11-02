@@ -1310,7 +1310,7 @@ function docActions(d, side, isNew) {
   if (d.source === 'Quote Desk') {
     if (d.status === 'posted' && openAmount(d) > 0.005) b.push('<button class="btn primary" data-act="pay">Record receipt</button>');
     if (d.status === 'posted') b.push('<button class="btn" data-act="credit">Create credit note</button>');
-    b.push(`<a class="btn" href="${typeof QUOTE_DESK_URL !== 'undefined' ? QUOTE_DESK_URL : '#'}">Open in Quote Desk ↗</a>`);
+    b.push(`<a class="btn" href="${typeof QUOTE_DESK_URL !== 'undefined' ? QUOTE_DESK_URL : '#'}" title="Print and send it from Quote Desk on the company letterhead">Print in Quote Desk ↗</a>`);
     return b.join('');
   }
   if (d.status === 'draft') {
@@ -1329,7 +1329,7 @@ function docActions(d, side, isNew) {
     b.push('<button class="btn danger ghost" data-act="void">Void</button>');
   }
   if (!isNew) {
-    b.push('<button class="btn" data-act="pdf">PDF</button><button class="btn" data-act="html">Print (HTML)</button>');
+    b.push(FB ? '<button class="btn" data-act="pdf">🖨 Print / save PDF</button>' : '<button class="btn" data-act="pdf">PDF</button><button class="btn" data-act="html">Print (HTML)</button>');
     if (side === 'S' && ['invoice', 'credit'].includes(d.type) && d.status === 'posted') b.push('<button class="btn" data-act="xml" title="UBL 2.1 / PINT AE draft for your Accredited Service Provider">E-invoice XML</button>');
     b.push('<button class="btn ghost" data-act="dup">Duplicate</button>');
   }
@@ -2565,7 +2565,13 @@ PAGES.dashboard = (m) => {
   const chart = months.map(x => { const d = fsData(monthEnd(x), x); return { label: MONTHS[Number(x.slice(5, 7)) - 1], a: d.revenue, b: r2(d.cos + d.sell + d.admin + d.fin) }; });
   const overdue = S.data.sales.filter(d => d.type === 'invoice' && d.status === 'posted' && d.dueDate < t && openAmount(d) > 0.005).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const billsDue = S.data.purchases.filter(d => d.type === 'bill' && d.status === 'posted' && openAmount(d) > 0.005 && d.dueDate <= addDays(t, 14)).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  const pdcDue = S.data.payments.filter(p => p.status === 'posted' && p.method === 'pdc' && !p.clearedDate && !p.bouncedDate && p.chequeDate <= addDays(t, 7));
+  const pdcDue0 = S.data.payments.filter(p => p.status === 'posted' && p.method === 'pdc' && !p.clearedDate && !p.bouncedDate && p.chequeDate <= addDays(t, 7));
+  const pdcDue = [];
+  const pdcAll = S.data.payments.filter(p => p.status === 'posted' && p.method === 'pdc' && !p.clearedDate && !p.bouncedDate).sort((a, b) => (a.chequeDate || '').localeCompare(b.chequeDate || ''));
+  const pdcSoon = pdcAll.filter(p => (p.chequeDate || '') <= addDays(t, 30));
+  const pdcIn = r2(pdcSoon.filter(p => p.kind === 'receipt').reduce((x, p) => x + num(p.amount) * (num(p.rate) || 1), 0)), pdcOut = r2(pdcSoon.filter(p => p.kind === 'payment').reduce((x, p) => x + num(p.amount) * (num(p.rate) || 1), 0));
+  const bankNow = sumGroup(bal, a => a.grp === 'cash' && a.code !== '1100');
+  const later = pdcAll.length - pdcSoon.length;
   const low = S.data.items.filter(i => i.type === 'goods' && num(i.reorder) && (L().INV.st[i.id] || { qty: 0 }).qty <= num(i.reorder));
   const cal = complianceCalendar();
   const empty = !S.data.sales.length && !S.data.purchases.length && !S.data.journals.length;
@@ -2584,9 +2590,14 @@ PAGES.dashboard = (m) => {
     <div class="dgrid"><div class="card"><h3>Revenue vs costs – last 12 months</h3>${barChart(chart, { la: 'Revenue', lb: 'Costs' })}</div>
     <div class="card"><h3>Compliance calendar</h3><div class="cal">${cal.map(c => `<div class="cl ${c.d < t ? 'past' : daysBetween(t, c.d) <= 14 ? 'soon' : ''}"><div class="cd"><b>${parseD(c.d).getDate()}</b><span>${MONTHS[parseD(c.d).getMonth()]} ${String(parseD(c.d).getFullYear()).slice(2)}</span></div><div><b>${esc(c.t)}</b><div class="muted small">${esc(c.n)}</div></div></div>`).join('') || '<p class="muted">Nothing upcoming.</p>'}</div></div>
     <div class="card"><h3>Overdue invoices</h3>${dataTable([{ k: 'no', l: 'Invoice' }, { k: 'party', l: 'Customer' }, { k: 'days', l: 'Days late' }, { k: 'open', l: 'Open (AED)', num: 1 }], overdue.slice(0, 8).map(d => ({ d, no: d.no, party: (contact(d.contactId) || {}).name, days: daysBetween(d.dueDate, t), open: r2(openAmount(d) * (num(d.rate) || 1)) })), { onRow: r => go('sales', 'edit', r.d.id), empty: 'No overdue invoices 🎉' })}</div>
-    <div class="card"><h3>Bills & cheques due soon</h3>${dataTable([{ k: 'no', l: 'Ref' }, { k: 'party', l: 'Party' }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'amt', l: 'Amount (AED)', num: 1 }], [...billsDue.map(d => ({ go: ['purchases', d.id], no: d.no, party: (contact(d.contactId) || {}).name, due: d.dueDate, amt: r2(openAmount(d) * (num(d.rate) || 1)) })), ...pdcDue.map(p => ({ go: ['banking', p.id], no: 'PDC ' + (p.chequeNo || ''), party: (contact(p.contactId) || {}).name + (p.kind === 'receipt' ? ' (deposit)' : ' (issued)'), due: p.chequeDate, amt: r2(num(p.amount) * (num(p.rate) || 1)) }))].slice(0, 10), { onRow: r => go(r.go[0], 'edit', r.go[1]), empty: 'Nothing due in the next 14 days.' })}</div></div>
+    <div class="card"><div class="toolbar" style="margin:0"><h3 style="margin:0">Post-dated cheques – next 30 days</h3><span class="grow"></span><a href="#banking" id="pdcAllLink" class="small">PDC register →</a></div>
+    <div class="kpis sm" style="margin:10px 0"><div class="kpi"><span>To deposit (received)</span><b class="pos">${fmt(pdcIn, 0)}</b></div><div class="kpi"><span>To be presented (issued)</span><b class="${pdcOut ? 'neg' : ''}">${fmt(pdcOut, 0)}</b></div><div class="kpi"><span>Bank after PDCs</span><b class="${bankNow + pdcIn - pdcOut < 0 ? 'neg' : ''}">${fmt(bankNow + pdcIn - pdcOut, 0)}</b></div></div>
+    ${dataTable([{ k: 'cd', l: 'Cheque date', html: r => `<span class="${r.cd < t ? 'neg' : r.cd <= addDays(t, 3) ? 'warnt' : ''}">${fmtD(r.cd)}${r.cd < t ? ' · deposit now' : ''}</span>` }, { k: 'type', l: 'Type' }, { k: 'party', l: 'Party' }, { k: 'chq', l: 'Cheque no.' }, { k: 'amt', l: 'Amount (AED)', num: 1 }], pdcSoon.map(p => ({ p, cd: p.chequeDate, type: p.kind === 'receipt' ? 'Received' : 'Issued', party: (contact(p.contactId) || {}).name || '', chq: p.chequeNo || '', amt: r2(num(p.amount) * (num(p.rate) || 1)) })), { onRow: r => go('banking', 'edit', r.p.id), empty: 'No post-dated cheques in the next 30 days.' })}
+    ${later ? `<p class="muted small">${later} more PDC(s) dated after ${fmtD(addDays(t, 30))} – see the PDC register.</p>` : ''}</div>
+    <div class="card"><h3>Bills due in the next 14 days</h3>${dataTable([{ k: 'no', l: 'Ref' }, { k: 'party', l: 'Party' }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'amt', l: 'Amount (AED)', num: 1 }], [...billsDue.map(d => ({ go: ['purchases', d.id], no: d.no, party: (contact(d.contactId) || {}).name, due: d.dueDate, amt: r2(openAmount(d) * (num(d.rate) || 1)) })), ...pdcDue.map(p => ({ go: ['banking', p.id], no: 'PDC ' + (p.chequeNo || ''), party: (contact(p.contactId) || {}).name + (p.kind === 'receipt' ? ' (deposit)' : ' (issued)'), due: p.chequeDate, amt: r2(num(p.amount) * (num(p.rate) || 1)) }))].slice(0, 10), { onRow: r => go(r.go[0], 'edit', r.go[1]), empty: 'No bills due in the next 14 days.' })}</div></div>
     ${L().warnings.length ? `<div class="alert err">${L().warnings.map(esc).join('<br>')}</div>` : ''}`;
   if (FB && empty) $('#main').insertAdjacentHTML('afterbegin', '<div class="card welcome"><h2>Welcome to CityCube Books</h2><p>Your accounting now shares the same Firebase database and logins as Quote Desk. Tax invoices issued in Quote Desk flow into the ledger automatically.</p><ol><li><a href="#company-setup">Check company details, TRN and VAT period</a></li><li><a href="#journals">Enter opening balances</a></li><li>Record supplier bills, receipts and payroll here</li></ol></div>');
+  if ($('#pdcAllLink')) $('#pdcAllLink').onclick = (e) => { e.preventDefault(); VIEW.tab = 'pdc'; go('banking'); };
   if ($('#demoBtn')) $('#demoBtn').onclick = () => confirmBox('Load demo data?', async () => { await seedDemo(); toast('Demo data loaded'); render(); });
 };
 function complianceCalendar() {
