@@ -98,6 +98,16 @@ body.locked #side,body.locked .search,body.locked .quick,body.locked #menuBtn{di
 .hintbar{background:#f4f6fb;border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:8px;padding:7px 12px;margin:2px 0 12px;font-size:12.5px;color:var(--ink2);line-height:1.6}.hintbar:empty{display:none}.hintbar .sep{color:#b8c0cf;margin:0 2px}
 .profit{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:8px 0 10px}.pgrid>div{background:#f6f8fc;border:1px solid var(--line);border-radius:8px;padding:8px 10px}.pgrid span{display:block;font-size:11.5px;color:var(--ink2)}.pgrid b{font:700 17px var(--f-display);color:var(--acc)}.pgrid .pos b{color:var(--grn)}.pgrid .neg b{color:var(--red)}
 .threshbar{position:relative;height:14px;background:#eef1f6;border-radius:8px;margin:18px 0 26px;max-width:700px}.threshbar div{height:100%;background:var(--acc);border-radius:8px}.threshbar div.near{background:var(--orange)}.threshbar div.over{background:var(--red)}.threshbar span{position:absolute;top:16px;transform:translateX(-50%);font-size:11px;color:var(--mut)}
+
+/* status palette: navy = normal · green = good · amber = soon · red = act now · magenta = brand only */
+.kpi b.neg,.kpi b .neg{color:var(--red)!important}.kpi i .neg{font-weight:600}
+.attn{background:#fff;border:1px solid var(--line);border-left:4px solid var(--red);border-radius:var(--r);padding:10px 14px;margin-bottom:16px;box-shadow:var(--sh)}.attn.ok{border-left-color:var(--grn);color:var(--grn);font-weight:600}
+.attnh{font:700 13px var(--f-display);color:var(--ink);margin-bottom:6px;display:flex;gap:8px;align-items:center}
+.attni{display:flex;align-items:center;gap:10px;padding:5px 6px;border-radius:6px;color:var(--ink);cursor:pointer;font-size:13.5px}.attni:hover{background:#f6f8fc;text-decoration:none}.attni i{width:8px;height:8px;border-radius:50%;flex:none}.attni.red i{background:var(--red)}.attni.amber i{background:var(--amb)}.attni span{margin-left:auto;color:var(--mut)}
+.banklist{display:flex;flex-direction:column;gap:8px;margin-top:10px}.bankrow{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) auto;gap:10px;align-items:center;color:var(--ink);cursor:pointer;padding:4px 2px;border-radius:6px}.bankrow:hover{background:#f6f8fc;text-decoration:none}.bn2{display:flex;gap:6px;align-items:center;min-width:0}.bn2 span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bbar{height:8px;background:#eef1f6;border-radius:6px;overflow:hidden}.bbar i{display:block;height:100%;background:var(--acc);border-radius:6px}.bbar i.neg{background:var(--red)}.bankrow b{font-variant-numeric:tabular-nums;color:var(--acc)}
+.fcrow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:10px 0}.fcrow div{background:#f6f8fc;border-radius:8px;padding:6px 8px}.fcrow span{display:block;font-size:11px;color:var(--ink2)}.fcrow b{font:700 15px var(--f-display);color:var(--acc)}.fcrow i{display:block;font-style:normal;font-size:10.5px;color:var(--mut)}
+.fcchart{width:100%;height:110px;display:block;margin-bottom:6px}.fcchart .area{fill:rgba(20,48,95,.08)}.fcchart .ln{fill:none;stroke:var(--acc);stroke-width:2;vector-effect:non-scaling-stroke}.fcchart .ln.bad{stroke:var(--red)}.fcchart .zero{stroke:var(--red);stroke-dasharray:4 3;vector-effect:non-scaling-stroke}.fcchart .pt{fill:var(--amb)}.fcchart .bad{fill:var(--red)}
+@media (max-width:760px){.fcrow{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style></head><body>
 <script>var BOOKS_TARGET = 'firebase';
 /* CityCube brand assets (from the CityCube Quote Desk letterhead) */
@@ -2577,17 +2587,18 @@ PAGES.dashboard = (m) => {
   const empty = !S.data.sales.length && !S.data.purchases.length && !S.data.journals.length;
   m.innerHTML = pageHead('Dashboard', `${fyLabel(fs)} to date · ${fmtD(t)}`, '') +
     (empty && !FB ? `<div class="card welcome"><h2>Welcome to CityCube Books</h2><p>A complete double-entry accounting system for ${esc(s.name)}, built around UAE VAT (FTA), Corporate Tax and IFRS for SMEs. Get started:</p><ol><li><a href="#company-setup">Enter your company details, TRN and VAT period</a></li><li><a href="#journals">Enter opening balances</a> (or start fresh)</li><li><a href="#contacts">Add customers and suppliers</a> and <a href="#inventory">items</a></li><li>Issue your first <a href="#sales">tax invoice</a></li></ol><p class="muted">Want to look around first? <button class="btn sm" id="demoBtn">Load demo data</button> (you can erase it later in Company & Settings → Data).</p></div>` : '') +
+    (empty && !FB ? '' : attentionStrip(t)) +
     `<div class="kpis">
     <div class="kpi"><span>Revenue (FY to date)</span><b>${fmt(F.revenue, 0)}</b><i>AED</i></div>
     <div class="kpi"><span>Gross margin</span><b>${F.revenue ? (F.gp / F.revenue * 100).toFixed(1) + '%' : '–'}</b><i>GP AED ${fmt(F.gp, 0)}</i></div>
-    <div class="kpi"><span>Net profit (FY to date)</span><b class="${F.profit < 0 ? 'neg' : 'pos'}">${fmt(F.profit, 0)}</b><i>AED</i></div>
-    <div class="kpi"><span>Cash & bank</span><b>${fmt(cash, 0)}</b><i>AED</i></div>
+    <div class="kpi"><span>Net profit (FY to date)</span><b class="${F.profit < -0.5 ? 'neg' : F.profit > 0.5 ? 'pos' : ''}">${fmt(F.profit, 0)}</b><i>AED</i></div>
+    <div class="kpi"><span>Cash & bank</span><b class="${cash < -0.5 ? 'neg' : ''}">${fmt(cash, 0)}</b><i>AED · ${bankAccs().filter(a => (bal[a.code] || 0) < -0.005).length ? '<span class="neg">account overdrawn</span>' : 'all accounts'}</i></div>
     <div class="kpi"><span>Receivables</span><b>${fmt(ar, 0)}</b><i>${overdue.length} overdue</i></div>
     <div class="kpi"><span>Payables</span><b>${fmt(ap, 0)}</b><i>${billsDue.length} due in 14 days</i></div>
     <div class="kpi"><span>Inventory</span><b>${fmt(inv, 0)}</b><i>${low.length} to reorder</i></div>
     ${s.vatRegistered ? `<div class="kpi"><span>VAT this period</span><b class="${vt.b14 > 0 ? '' : 'pos'}">${fmt(vt.b14, 0)}</b><i>${vt.b14 >= 0 ? 'payable' : 'refundable'} · due ${fmtD(vatDue(vp.to))}</i></div>` : (() => { const th = vatThreshold(t); return `<div class="kpi"><span>VAT registration threshold</span><b class="${th.mustRegister ? 'neg' : th.pct >= 70 ? 'warnt' : ''}">${th.pct.toFixed(0)}%</b><i>AED ${fmt(th.taxable, 0)} of 375,000 · last 12 months</i></div>`; })()}
     </div>
-    <div class="dgrid"><div class="card"><h3>Revenue vs costs – last 12 months</h3>${barChart(chart, { la: 'Revenue', lb: 'Costs' })}</div>
+    <div class="dgrid">${bankCard(t)}${forecastCard(t)}<div class="card"><h3>Revenue vs costs – last 12 months</h3>${barChart(chart, { la: 'Revenue', lb: 'Costs' })}</div>
     <div class="card"><h3>Compliance calendar</h3><div class="cal">${cal.map(c => `<div class="cl ${c.d < t ? 'past' : daysBetween(t, c.d) <= 14 ? 'soon' : ''}"><div class="cd"><b>${parseD(c.d).getDate()}</b><span>${MONTHS[parseD(c.d).getMonth()]} ${String(parseD(c.d).getFullYear()).slice(2)}</span></div><div><b>${esc(c.t)}</b><div class="muted small">${esc(c.n)}</div></div></div>`).join('') || '<p class="muted">Nothing upcoming.</p>'}</div></div>
     <div class="card"><h3>Overdue invoices</h3>${dataTable([{ k: 'no', l: 'Invoice' }, { k: 'party', l: 'Customer' }, { k: 'days', l: 'Days late' }, { k: 'open', l: 'Open (AED)', num: 1 }], overdue.slice(0, 8).map(d => ({ d, no: d.no, party: (contact(d.contactId) || {}).name, days: daysBetween(d.dueDate, t), open: r2(openAmount(d) * (num(d.rate) || 1)) })), { onRow: r => go('sales', 'edit', r.d.id), empty: 'No overdue invoices 🎉' })}</div>
     <div class="card"><div class="toolbar" style="margin:0"><h3 style="margin:0">Post-dated cheques – next 30 days</h3><span class="grow"></span><a href="#banking" id="pdcAllLink" class="small">PDC register →</a></div>
@@ -2597,6 +2608,7 @@ PAGES.dashboard = (m) => {
     <div class="card"><h3>Bills due in the next 14 days</h3>${dataTable([{ k: 'no', l: 'Ref' }, { k: 'party', l: 'Party' }, { k: 'due', l: 'Due', fmt: fmtD }, { k: 'amt', l: 'Amount (AED)', num: 1 }], [...billsDue.map(d => ({ go: ['purchases', d.id], no: d.no, party: (contact(d.contactId) || {}).name, due: d.dueDate, amt: r2(openAmount(d) * (num(d.rate) || 1)) })), ...pdcDue.map(p => ({ go: ['banking', p.id], no: 'PDC ' + (p.chequeNo || ''), party: (contact(p.contactId) || {}).name + (p.kind === 'receipt' ? ' (deposit)' : ' (issued)'), due: p.chequeDate, amt: r2(num(p.amount) * (num(p.rate) || 1)) }))].slice(0, 10), { onRow: r => go(r.go[0], 'edit', r.go[1]), empty: 'No bills due in the next 14 days.' })}</div></div>
     ${L().warnings.length ? `<div class="alert err">${L().warnings.map(esc).join('<br>')}</div>` : ''}`;
   if (FB && empty) $('#main').insertAdjacentHTML('afterbegin', '<div class="card welcome"><h2>Welcome to CityCube Books</h2><p>Your accounting now shares the same Firebase database and logins as Quote Desk. Tax invoices issued in Quote Desk flow into the ledger automatically.</p><ol><li><a href="#company-setup">Check company details, TRN and VAT period</a></li><li><a href="#journals">Enter opening balances</a></li><li>Record supplier bills, receipts and payroll here</li></ol></div>');
+  bindDashboard(m, t);
   if ($('#pdcAllLink')) $('#pdcAllLink').onclick = (e) => { e.preventDefault(); VIEW.tab = 'pdc'; go('banking'); };
   if ($('#demoBtn')) $('#demoBtn').onclick = () => confirmBox('Load demo data?', async () => { await seedDemo(); toast('Demo data loaded'); render(); });
 };
@@ -3065,6 +3077,85 @@ function closeJobDialog(inv) {
   <label class="fld"><span>Closing note (optional)</span><input id="jcNote" placeholder="e.g. all freight and installation costs received"></label>
   <p class="muted small">Closing locks the job: no more costs can be linked or moved until it is reopened. It does not change the accounts.</p>`,
   [{ label: 'Cancel' }, ...(blocked ? [] : [{ label: '🔒 Close job', cls: 'primary', onClick: async (w) => { const x = JSON.parse(JSON.stringify(byId('sales', inv.id))); x.jobClosed = { at: new Date().toISOString(), by: S.user.name || '', note: $('#jcNote', w).value.trim(), rev: P.rev, cogs: P.cogs, costs: P.costs, gp: P.gp, pct: P.pct }; await store.save('sales', x, 'job-close'); toast('Job ' + inv.no + ' closed with profit AED ' + fmt(P.gp)); render(); } }])], { wide: true });
+}
+
+/* ===================== Dashboard: bank accounts, 30-day cash forecast, needs-attention strip ===================== */
+function bankCard(t) {
+  const bal = balances(t); const accs = bankAccs();
+  const rows = accs.map(a => ({ a, b: r2(bal[a.code] || 0) }));
+  const total = r2(rows.reduce((s, r) => s + r.b, 0)); const max = Math.max(1, ...rows.map(r => Math.abs(r.b)));
+  const pdcR = r2(sumGroup(bal, a => a.sys === 'PDCR')), pdcP = r2(-sumGroup(bal, a => a.sys === 'PDCP'));
+  return `<div class="card"><div class="toolbar" style="margin:0"><h3 style="margin:0">Bank & cash</h3><span class="grow"></span><b class="${total < 0 ? 'neg' : ''}" style="font:700 18px var(--f-display)">AED ${fmt(total)}</b></div>
+  <div class="banklist">${rows.map(r => `<a class="bankrow" data-gl="${r.a.code}"><div class="bn2"><span>${esc(r.a.name)}</span>${r.b < -0.005 ? '<span class="badge red">Overdrawn</span>' : ''}</div><div class="bbar"><i class="${r.b < 0 ? 'neg' : ''}" style="width:${Math.max(2, Math.abs(r.b) / max * 100)}%"></i></div><b class="${r.b < -0.005 ? 'neg' : ''}">${fmt(r.b)}</b></a>`).join('')}</div>
+  ${pdcR || pdcP ? `<p class="small muted" style="margin:8px 0 0">Not yet in the bank: PDCs received AED ${fmt(pdcR)} · PDCs issued AED ${fmt(pdcP)}</p>` : ''}</div>`;
+}
+/* Forecast of bank + cash day by day for the next 30 days (conservative: overdue receivables are not assumed collected) */
+function cashForecast(t, days = 30) {
+  const end = addDays(t, days); const bal = balances(t);
+  const start = r2(sumGroup(bal, a => a.grp === 'cash'));
+  const ev = []; const add = (date, amt, label, kind, go) => { if (Math.abs(amt) < 0.005) return; ev.push({ date: date < t ? t : date, amt: r2(amt), label, kind, go }); };
+  let overdueAR = 0;
+  S.data.sales.filter(d => d.type === 'invoice' && d.status === 'posted').forEach(d => { const o = openAmount(d); if (o <= 0.005) return; const due = d.dueDate || d.date; const oA = o * (num(d.rate) || 1); if (due < t) { overdueAR += oA; return; } if (due <= end) add(due, oA, d.no + ' · ' + ((docParty(d) || {}).name || ''), 'Receivable', ['sales', d.id]); });
+  S.data.purchases.filter(d => d.type === 'bill' && d.status === 'posted').forEach(d => { const o = openAmount(d); if (o <= 0.005) return; const due = d.dueDate || d.date; if (due <= end) add(due, -o * (num(d.rate) || 1), d.no + ' · ' + ((docParty(d) || {}).name || ''), due < t ? 'Overdue bill' : 'Bill', ['purchases', d.id]); });
+  S.data.payments.filter(p => p.status === 'posted' && p.method === 'pdc' && !p.clearedDate && !p.bouncedDate && (p.chequeDate || '') <= end).forEach(p => add(p.chequeDate || t, (p.kind === 'receipt' ? 1 : -1) * num(p.amount) * (num(p.rate) || 1), 'PDC ' + (p.chequeNo || '') + ' · ' + ((contact(p.contactId) || {}).name || ''), p.kind === 'receipt' ? 'PDC to deposit' : 'PDC issued', ['banking', p.id]));
+  // salaries: unpaid posted payroll, plus the next month-end payroll estimated from active employees
+  S.data.payruns.filter(r => r.status === 'posted' && !r.paidDate).forEach(r => add(t, -payrunCalc(r).net, 'Payroll ' + monthLabel(r.month) + ' (unpaid)', 'Salaries', ['payroll', null]));
+  const nextMe = monthEnd(t); const nextMonth = nextMe.slice(0, 7); const has = S.data.payruns.some(r => r.month === nextMonth && r.status !== 'void');
+  if (!has) { const gross = S.data.employees.filter(e => !e.leaveDate && e.joinDate && e.joinDate <= nextMe).reduce((s, e) => s + num(e.basic) + num(e.housing) + num(e.transport) + num(e.other), 0); if (gross && nextMe <= end) add(nextMe, -gross, 'Salaries ' + monthLabel(nextMonth) + ' (estimate)', 'Salaries', ['payroll', null]); }
+  // VAT
+  if (S.settings.vatRegistered) {
+    S.data.vatreturns.filter(v => v.status === 'filed' && !v.paidOn && v.boxes).forEach(v => { const due = vatDue(v.to); if (due <= end) add(due, -num(v.boxes.b14), 'VAT return ' + fmtD(v.from) + '–' + fmtD(v.to), 'VAT', ['vat', null]); });
+    const vp = vatPeriodOf(addDays(t, -25)); const due = vatDue(vp.to); if (due >= t && due <= end && !S.data.vatreturns.some(v => v.from === vp.from && v.status === 'filed')) { const tt = vatTotals(computeVAT(vp.from, vp.to).B); if (tt.b14 > 0) add(due, -tt.b14, 'VAT return ' + fmtD(vp.from) + '–' + fmtD(vp.to) + ' (estimate)', 'VAT', ['vat', null]); }
+  }
+  ev.sort((a, b) => a.date.localeCompare(b.date) || a.amt - b.amt);
+  const series = []; let run = start, low = start, lowDate = t; let k = 0;
+  for (let i = 0; i <= days; i++) { const day = addDays(t, i); while (k < ev.length && ev[k].date === day) { run = r2(run + ev[k].amt); k++; } series.push({ day, bal: run }); if (run < low) { low = run; lowDate = day; } }
+  const inflow = r2(ev.filter(e => e.amt > 0).reduce((s, e) => s + e.amt, 0)), outflow = r2(-ev.filter(e => e.amt < 0).reduce((s, e) => s + e.amt, 0));
+  return { start, end: run, low: r2(low), lowDate, inflow, outflow, ev, series, overdueAR: r2(overdueAR) };
+}
+function forecastCard(t) {
+  const F = cashForecast(t); const W = 560, H = 120, P = 6; const vals = F.series.map(s => s.bal); const mx = Math.max(...vals, 0), mn = Math.min(...vals, 0); const rng = (mx - mn) || 1;
+  const x = (i) => P + i * (W - 2 * P) / (F.series.length - 1); const y = (v) => P + (mx - v) / rng * (H - 2 * P);
+  const path = F.series.map((s, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(s.bal).toFixed(1)).join(' ');
+  const li = F.series.findIndex(s => s.day === F.lowDate);
+  const top = F.ev.slice().sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt)).slice(0, 6).sort((a, b) => a.date.localeCompare(b.date));
+  return `<div class="card"><div class="toolbar" style="margin:0"><h3 style="margin:0">Cash forecast – next 30 days</h3><span class="grow"></span><span class="small muted">bank & cash</span></div>
+  <div class="fcrow"><div><span>Today</span><b class="${F.start < 0 ? 'neg' : ''}">${fmt(F.start, 0)}</b></div><div><span>Money in</span><b class="pos">+${fmt(F.inflow, 0)}</b></div><div><span>Money out</span><b class="${F.outflow ? 'neg' : ''}">−${fmt(F.outflow, 0)}</b></div><div><span>In 30 days</span><b class="${F.end < 0 ? 'neg' : ''}">${fmt(F.end, 0)}</b></div><div><span>Lowest point</span><b class="${F.low < 0 ? 'neg' : F.low < F.outflow * 0.25 ? 'warnt' : ''}">${fmt(F.low, 0)}</b><i>${fmtD(F.lowDate)}</i></div></div>
+  <svg viewBox="0 0 ${W} ${H}" class="fcchart" preserveAspectRatio="none" role="img" aria-label="30-day cash forecast">${mn < 0 ? `<line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" class="zero"/>` : ''}<path d="${path} L${x(F.series.length - 1)} ${H} L${x(0)} ${H} Z" class="area"/><path d="${path}" class="ln ${F.low < 0 ? 'bad' : ''}"/><circle cx="${x(li)}" cy="${y(F.low)}" r="4" class="${F.low < 0 ? 'bad' : 'pt'}"><title>Lowest ${fmt(F.low)} on ${fmtD(F.lowDate)}</title></circle></svg>
+  ${top.length ? `<table class="tbl compact"><tbody>${top.map(e => `<tr class="click" data-fgo="${e.go[0]}|${e.go[1] || ''}"><td>${fmtD(e.date)}</td><td>${esc(e.kind)}</td><td>${esc(e.label)}</td><td class="n ${e.amt < 0 ? 'neg' : 'pos'}">${e.amt > 0 ? '+' : '−'}${fmt(Math.abs(e.amt))}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">No receipts or payments expected in the next 30 days.</p>'}
+  <p class="small muted" style="margin:6px 0 0">Based on due dates of open invoices and bills, PDCs, salaries and VAT.${F.overdueAR ? ' Overdue receivables of AED ' + fmt(F.overdueAR) + ' are not counted – collecting them is extra cash.' : ''}</p></div>`;
+}
+/* "Needs attention" – everything that needs action today, each line opens the right screen */
+function attentionItems(t) {
+  const out = []; const add = (sev, text, go) => out.push({ sev, text, go });
+  const bal = balances(t);
+  bankAccs().forEach(a => { const b = r2(bal[a.code] || 0); if (b < -0.005) add('red', `${a.name} is overdrawn by AED ${fmt(-b)}${a.code === '1100' ? ' – record the petty cash top-up' : ''}`, ['reports', 'gl', { acc: a.code }]); });
+  const od = S.data.sales.filter(d => d.type === 'invoice' && d.status === 'posted' && d.dueDate && d.dueDate < t && openAmount(d) > 0.005); if (od.length) add('red', `${od.length} customer invoice(s) overdue · AED ${fmt(od.reduce((s, d) => s + openAmount(d) * (num(d.rate) || 1), 0))}`, ['reports', 'ar', {}]);
+  const ob = S.data.purchases.filter(d => d.type === 'bill' && d.status === 'posted' && d.dueDate && d.dueDate < t && openAmount(d) > 0.005); if (ob.length) add('amber', `${ob.length} supplier bill(s) past due · AED ${fmt(ob.reduce((s, d) => s + openAmount(d) * (num(d.rate) || 1), 0))}`, ['reports', 'ap', {}]);
+  const pdcLate = S.data.payments.filter(p => p.status === 'posted' && p.method === 'pdc' && p.kind === 'receipt' && !p.clearedDate && !p.bouncedDate && p.chequeDate && p.chequeDate <= t); if (pdcLate.length) add('red', `${pdcLate.length} post-dated cheque(s) ready to deposit · AED ${fmt(pdcLate.reduce((s, p) => s + num(p.amount) * (num(p.rate) || 1), 0))}`, ['banking', null, {}, 'pdc']);
+  const pdcSoon = S.data.payments.filter(p => p.status === 'posted' && p.method === 'pdc' && p.kind === 'payment' && !p.clearedDate && !p.bouncedDate && p.chequeDate > t && p.chequeDate <= addDays(t, 3)); if (pdcSoon.length) add('amber', `${pdcSoon.length} issued cheque(s) will be presented within 3 days · AED ${fmt(pdcSoon.reduce((s, p) => s + num(p.amount) * (num(p.rate) || 1), 0))}`, ['banking', null, {}, 'pdc']);
+  if (S.settings.vatRegistered) { vatPeriodsList().forEach(p => { const due = vatDue(p.to); const filed = S.data.vatreturns.find(v => v.from === p.from && v.status === 'filed'); if (!filed && due < t) add('red', `VAT return ${fmtD(p.from)}–${fmtD(p.to)} is overdue (was due ${fmtD(due)})`, ['vat', 'return', { from: p.from, to: p.to }]); else if (!filed && p.to < t && daysBetween(t, due) <= 7) add('amber', `VAT return ${fmtD(p.from)}–${fmtD(p.to)} due in ${daysBetween(t, due)} day(s)`, ['vat', 'return', { from: p.from, to: p.to }]); }); }
+  else { const th = vatThreshold(t); if (th.mustRegister) add('red', `VAT registration required – AED ${fmt(th.taxable, 0)} taxable turnover in 12 months exceeds AED 375,000`, ['vat', null]); else if (th.pct >= 70) add('amber', `VAT registration threshold ${th.pct.toFixed(0)}% reached`, ['vat', null]); }
+  S.data.contacts.filter(c => c.isCustomer && num(c.creditLimit)).forEach(c => { const ar = (hintData(t).ct[c.id] || {}).ar || 0; if (ar > num(c.creditLimit)) add('amber', `${c.name} is over its credit limit · AED ${fmt(ar)} of ${fmt(c.creditLimit)}`, ['contacts', 'view', c.id]); });
+  const neg = S.data.items.filter(i => i.type === 'goods' && (L().INV.st[i.id] || { qty: 0 }).qty < -0.0001); if (neg.length) add('red', `${neg.length} item(s) with negative stock – record the missing purchase or stock count`, ['inventory', null]);
+  const drafts = [...S.data.sales, ...S.data.purchases, ...S.data.payments].filter(d => d.status === 'draft' && d.date && d.date < addDays(t, -7) && !['quote', 'po'].includes(d.type)); if (drafts.length) add('amber', `${drafts.length} draft document(s) older than a week are not posted`, ['purchases', null]);
+  bankAccs().filter(a => a.code !== '1100').forEach(a => { const recs = S.data.recon.filter(r => r.acc === a.code).sort((x, y) => y.date.localeCompare(x.date)); const any = L().lines.some(l => l.acc === a.code); if (any && (!recs.length || recs[0].date < addDays(t, -45))) add('amber', `${a.name} not reconciled ${recs.length ? 'since ' + fmtD(recs[0].date) : 'yet'}`, ['banking', null, {}, 'recon']); });
+  S.data.employees.filter(e => !e.leaveDate && e.visaExpiry && e.visaExpiry <= addDays(t, 30)).forEach(e => add(e.visaExpiry < t ? 'red' : 'amber', `Visa of ${e.name} ${e.visaExpiry < t ? 'expired' : 'expires'} ${fmtD(e.visaExpiry)}`, ['payroll', null]));
+  if (S.settings.licenceExpiry && S.settings.licenceExpiry <= addDays(t, 30)) add(S.settings.licenceExpiry < t ? 'red' : 'amber', `Trade licence ${S.settings.licenceExpiry < t ? 'expired' : 'expires'} ${fmtD(S.settings.licenceExpiry)}`, ['company-setup', null]);
+  if (FB && QD.issues) QD.issues.filter(i => i[0] === 'err').forEach(i => add('red', 'Quote Desk sync: ' + i[1], ['sales', i[2] ? 'edit' : null, i[2] || null]));
+  L().warnings.forEach(w => add('red', w, ['reports', 'tb']));
+  return out.sort((a, b) => (a.sev === 'red' ? 0 : 1) - (b.sev === 'red' ? 0 : 1));
+}
+function attentionStrip(t) {
+  const items = attentionItems(t); if (!items.length) return `<div class="attn ok">✓ Nothing needs attention today.</div>`;
+  const show = items.slice(0, 8);
+  return `<div class="attn"><div class="attnh">Needs attention <span class="badge ${items.some(i => i.sev === 'red') ? 'red' : 'amber'}">${items.length}</span></div>${show.map((x, i) => `<a class="attni ${x.sev}" data-att="${i}"><i></i>${esc(x.text)}<span>→</span></a>`).join('')}${items.length > show.length ? `<div class="small muted">+ ${items.length - show.length} more</div>` : ''}</div>`;
+}
+function bindDashboard(m, t) {
+  const items = attentionItems(t);
+  $$('[data-att]', m).forEach(a => a.onclick = () => { const g = items[+a.dataset.att].go; if (g[3]) VIEW.tab = g[3]; if (g[1] === 'view' || g[1] === 'edit') go(g[0], g[1], g[2]); else go(g[0], g[1], null, g[2] || {}); });
+  $$('[data-gl]', m).forEach(a => a.onclick = () => go('reports', 'gl', null, { acc: a.dataset.gl }));
+  $$('[data-fgo]', m).forEach(tr => tr.onclick = () => { const [p, id] = tr.dataset.fgo.split('|'); if (p === 'banking' || p === 'sales' || p === 'purchases') { if (id) go(p, 'edit', id); else go(p); } else go(p); });
 }
 
 /* ===================== Demo data & boot ===================== */
